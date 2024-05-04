@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 
+@available(*, deprecated, message: "This implementation is experimantal, and likely to change in future")
 public struct TaskScopeBindModifier: ViewModifier {
     
     @LazyTaskScopeState private var taskScope

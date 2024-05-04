@@ -27,6 +27,7 @@ import _Concurrency
 
  ```
  */
+@available(*, deprecated, message: "This implementation is experimantal, and likely to change in future")
 public struct StandaloneTaskScope: TaskScopeProtocol {
         
     @inlinable

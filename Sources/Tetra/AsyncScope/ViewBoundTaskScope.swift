@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 
+@available(*, deprecated, message: "This protocol and implementation is experimantal, likely to change in futue")
 public struct ViewBoundTaskScope: TaskScopeProtocol {
     
     @discardableResult
