@@ -114,7 +114,8 @@ extension PlistWrapperEncoder.EncoderImp: Encoder {
             let container = PlistWrapperEncoder.KeyedEncoder<Key>(codingPath: codingPath, userInfo: userInfo, ref: ref)
             return .init(container)
         default:
-            preconditionFailure("Attempt to create new keyed encoding container when already previously encoded at this path.")
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new keyed encoding container when already previously encoded at this path.")
+            return .init(InvalidKeyedEncodingContainer(context: context, codingPath: codingPath))
         }
     }
     
@@ -130,12 +131,16 @@ extension PlistWrapperEncoder.EncoderImp: Encoder {
         case .array(_):
             return PlistWrapperEncoder.UnkeyedEncoder(codingPath: codingPath, userInfo: userInfo, ref: ref)
         default:
-            preconditionFailure("Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            return InvalidUnkeyedEncodingContainer(context: context, codingPath: codingPath)
         }
     }
     
     func singleValueContainer() -> SingleValueEncodingContainer {
-        precondition(ref.backing == nil, "Attempt to create new single encoding container when already previously encoded at this path.")
+        if ref.backing != nil {
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new single encoding container when already previously encoded at this path.")
+            return InvalidSingleEncodingContainer(context: context, codingPath: codingPath)
+        }
         return PlistWrapperEncoder.SingleEncoder(codingPath: codingPath, userInfo: userInfo, ref: ref)
     }
     

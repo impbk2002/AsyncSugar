@@ -207,7 +207,8 @@ extension JsonWrapperEncoder.EncoderImp: Encoder {
             let container = JsonWrapperEncoder.KeyedEncoder<Key>(ref: ref, codingPath: codingPath, userInfo: userInfo)
             return .init(container)
         default:
-            preconditionFailure("Attempt to create new keyed encoding container when already previously encoded at this path.")
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new keyed encoding container when already previously encoded at this path.")
+            return .init(InvalidKeyedEncodingContainer(context: context, codingPath: codingPath))
         }
     }
     
@@ -222,13 +223,17 @@ extension JsonWrapperEncoder.EncoderImp: Encoder {
             fallthrough
         case .array(_):
             return JsonWrapperEncoder.UnkeyedEncoder(ref: ref, codingPath: codingPath, userInfo: userInfo)
-        default:
-            preconditionFailure("Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+        case .object(_), .primitive(_):
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            return InvalidUnkeyedEncodingContainer(context: context, codingPath: codingPath)
         }
     }
     
     func singleValueContainer() -> SingleValueEncodingContainer {
-        precondition(ref.backing == nil, "Attempt to create new single encoding container when already previously encoded at this path.")
+        if ref.backing != nil {
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            return InvalidSingleEncodingContainer(context: context, codingPath: codingPath)
+        }
         return JsonWrapperEncoder.SingleEncoder(ref: ref, codingPath: codingPath, userInfo: userInfo)
     }
 }
