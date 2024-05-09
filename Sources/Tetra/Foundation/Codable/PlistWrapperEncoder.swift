@@ -154,7 +154,7 @@ extension PlistWrapperEncoder.SingleEncoder: SingleValueEncodingContainer {
     }
     
     func encodeNil() throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath, debugDescription: "null is not allowed in propertylist"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath, debugDescription: "null is not allowed in propertylist"))
     }
     
     func encode(_ value: Bool) throws {
@@ -243,7 +243,7 @@ extension PlistWrapperEncoder.SingleEncoder: SingleValueEncodingContainer {
 extension PlistWrapperEncoder.KeyedEncoder: KeyedEncodingContainerProtocol {
     
     func encodeNil(forKey key: Key) throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath + [key], debugDescription: "null is not allowed in propertyList"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath + [key], debugDescription: "null is not allowed in propertyList"))
     }
     
     func encode<T>(_ value: T, forKey key: Key) throws where T : Encodable {
@@ -366,7 +366,7 @@ extension PlistWrapperEncoder.UnkeyedEncoder: UnkeyedEncodingContainer {
     }
     
     func encodeNil() throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath + [TetraCodingKey(index: count)], debugDescription: "null is not allowed in propertyList"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath + [TetraCodingKey(index: count)], debugDescription: "null is not allowed in propertyList"))
     }
     
     mutating func encode<T>(_ value: T) throws where T : Encodable {
