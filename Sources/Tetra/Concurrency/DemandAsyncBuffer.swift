@@ -26,14 +26,9 @@ struct DemandAsyncBuffer: AsyncSequence, Sendable {
     private let continuation: AsyncStream<Element>.Continuation
     
     init() {
-        var reference:AsyncStream<Element>.Continuation? = nil
-        let semaphore = DispatchSemaphore(value: 0)
-        stream = .init{
-            reference = $0
-            semaphore.signal()
-        }
-        semaphore.wait()
-        continuation = reference.unsafelyUnwrapped
+        let tuple  = AsyncStream<Element>.makeStream()
+        stream = tuple.stream
+        continuation = tuple.continuation
     }
     
     func append(element: __owned Element) {

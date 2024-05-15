@@ -11,13 +11,13 @@ import Combine
 public extension Publisher {
     
     @inlinable
-    func mapTask<T:Sendable>(transform: @escaping @Sendable (Output) async -> T) -> Publishers.MapTask<Self,T> where Output:Sendable {
-        Publishers.MapTask(upstream: self, transform: transform)
+    func mapTask<T:Sendable>(transform: @escaping @Sendable (Output) async -> T) -> MapTask<Self,T> where Output:Sendable {
+        MapTask(upstream: self, transform: transform)
     }
     
     @inlinable
-    func tryMapTask<T:Sendable>(transform: @escaping @Sendable (Output) async throws -> T) -> Publishers.TryMapTask<Self,T> where Output:Sendable {
-        Publishers.TryMapTask(upstream: self, transform: transform)
+    func tryMapTask<T:Sendable>(transform: @escaping @Sendable (Output) async throws -> T) -> TryMapTask<Self,T> where Output:Sendable {
+        TryMapTask(upstream: self, transform: transform)
     }
     
     @available(iOS, deprecated: 15.0, renamed: "values")

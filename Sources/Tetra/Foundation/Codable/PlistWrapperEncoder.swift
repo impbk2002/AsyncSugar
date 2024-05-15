@@ -114,7 +114,8 @@ extension PlistWrapperEncoder.EncoderImp: Encoder {
             let container = PlistWrapperEncoder.KeyedEncoder<Key>(codingPath: codingPath, userInfo: userInfo, ref: ref)
             return .init(container)
         default:
-            preconditionFailure("Attempt to create new keyed encoding container when already previously encoded at this path.")
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new keyed encoding container when already previously encoded at this path.")
+            return .init(InvalidKeyedEncodingContainer(context: context, codingPath: codingPath))
         }
     }
     
@@ -130,12 +131,16 @@ extension PlistWrapperEncoder.EncoderImp: Encoder {
         case .array(_):
             return PlistWrapperEncoder.UnkeyedEncoder(codingPath: codingPath, userInfo: userInfo, ref: ref)
         default:
-            preconditionFailure("Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new unkeyed encoding container when already previously encoded at this path.")
+            return InvalidUnkeyedEncodingContainer(context: context, codingPath: codingPath)
         }
     }
     
     func singleValueContainer() -> SingleValueEncodingContainer {
-        precondition(ref.backing == nil, "Attempt to create new single encoding container when already previously encoded at this path.")
+        if ref.backing != nil {
+            let context = EncodingError.Context(codingPath: codingPath, debugDescription: "Attempt to create new single encoding container when already previously encoded at this path.")
+            return InvalidSingleEncodingContainer(context: context, codingPath: codingPath)
+        }
         return PlistWrapperEncoder.SingleEncoder(codingPath: codingPath, userInfo: userInfo, ref: ref)
     }
     
@@ -149,7 +154,7 @@ extension PlistWrapperEncoder.SingleEncoder: SingleValueEncodingContainer {
     }
     
     func encodeNil() throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath, debugDescription: "null is not allowed in propertylist"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath, debugDescription: "null is not allowed in propertylist"))
     }
     
     func encode(_ value: Bool) throws {
@@ -238,7 +243,7 @@ extension PlistWrapperEncoder.SingleEncoder: SingleValueEncodingContainer {
 extension PlistWrapperEncoder.KeyedEncoder: KeyedEncodingContainerProtocol {
     
     func encodeNil(forKey key: Key) throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath + [key], debugDescription: "null is not allowed in propertyList"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath + [key], debugDescription: "null is not allowed in propertyList"))
     }
     
     func encode<T>(_ value: T, forKey key: Key) throws where T : Encodable {
@@ -361,7 +366,7 @@ extension PlistWrapperEncoder.UnkeyedEncoder: UnkeyedEncodingContainer {
     }
     
     func encodeNil() throws {
-        throw EncodingError.invalidValue(Never.self, .init(codingPath: codingPath + [TetraCodingKey(index: count)], debugDescription: "null is not allowed in propertyList"))
+        throw EncodingError.invalidValue(Optional<Any>.none as Any, .init(codingPath: codingPath + [TetraCodingKey(index: count)], debugDescription: "null is not allowed in propertyList"))
     }
     
     mutating func encode<T>(_ value: T) throws where T : Encodable {
