@@ -51,6 +51,7 @@ extension TryMapTask {
         private let task:Task<Void,Never>
         private let demander:DemandAsyncBuffer
         
+        // TODO: Replace with Delegating StateHolder
         fileprivate init(upstream:Upstream, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async throws -> Output) {
             let buffer = DemandAsyncBuffer()
             let lock = createUncheckedStateLock(uncheckedState: S?.some(subscriber))
