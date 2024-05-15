@@ -35,8 +35,9 @@ extension ThrowingTaskGroup: CompatThrowingDiscardingTaskGroup where ChildTaskRe
 
 /**
     Manage Multiple Child Task. provides similair behavior of `flatMap`'s `maxPublisher`
+    precondition `maxTasks` must be none zero value
  */
-struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
     
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
@@ -56,17 +57,44 @@ struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstre
                 )
             )
     }
+    
+    
+    public init(
+        maxTasks: Subscribers.Demand = .max(1),
+        upstream: Upstream,
+        transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+    ) {
+        precondition(maxTasks != .none, "maxTasks can not be zero")
+        self.maxTasks = maxTasks
+        self.upstream = upstream
+        self.transform = transform
+    }
+    
 }
+
+extension MultiMapTask: Sendable where Upstream: Sendable {}
 
 extension MultiMapTask {
     
-    struct DelegateState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
+    internal struct DelegateState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
         
         let demandState: some UnfairStateLock<PendingDemandState> = createCheckedStateLock(checkedState: PendingDemandState(taskCount: 0, pendingDemand: .none))
         let subscriberState: some UnfairStateLock<S?> = createUncheckedStateLock(uncheckedState: .none)
         let buffer:DemandAsyncBuffer
         let maxTasks:Subscribers.Demand
         let transform: @Sendable (Upstream.Output) async -> Result<Output,Failure>
+        
+        init(
+            buffer: DemandAsyncBuffer,
+            maxTasks: Subscribers.Demand,
+            subscriber:S,
+            transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+        ) {
+            self.subscriberState.withLockUnchecked{ $0 = subscriber }
+            self.buffer = buffer
+            self.maxTasks = maxTasks
+            self.transform = transform
+        }
         
         struct PendingDemandState {
             var taskCount:Int
@@ -113,6 +141,10 @@ extension MultiMapTask {
                     subscription.request(newDemand)
                 }
             }
+        }
+        
+        func dropSubscriber() {
+            subscriberState.withLock{ $0 = nil }
         }
         
         func receiveValue(_ value:Output) -> Subscribers.Demand? {
@@ -197,7 +229,7 @@ extension MultiMapTask {
         }
     }
     
-    private final class Inner<S:Subscriber>:Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible where S.Input == Output, S.Failure == Failure {
+    private final class Inner:Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible  {
         
         var description: String { "MultiMapTask" }
         
@@ -206,17 +238,16 @@ extension MultiMapTask {
         private let demander:DemandAsyncBuffer
 
         // TODO: Replace with Delegating StateHolder
-        fileprivate init(
+        fileprivate init<S:Subscriber>(
             maxTasks:Subscribers.Demand,
             upstream:Upstream,
             subscriber:S,
             transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>
-        ) {
+        ) where S.Input == Output, S.Failure == Failure {
             precondition(maxTasks != .none, "maxTasks can not be zero")
             let buffer = DemandAsyncBuffer()
             demander = buffer
-            let state = DelegateState<S>(buffer: buffer, maxTasks: maxTasks, transform: transform)
-            state.subscriberState.withLockUnchecked{ $0 = subscriber }
+            let state = DelegateState(buffer: buffer, maxTasks: maxTasks, subscriber: subscriber, transform: transform)
             task = Task {
                 let subscriptionLock = createCheckedStateLock(checkedState: SubscriptionContinuation.waiting)
                 let stream = DelegateState<S>.makeStream(upstream: upstream, receiveSubscription: subscriptionLock.received, onCancel: { buffer.close() })
@@ -243,7 +274,7 @@ extension MultiMapTask {
 
                 } onCancel: {
                     subscription.cancel()
-                    state.subscriberState.withLock{ $0 = nil }
+                    state.dropSubscriber()
                 }
             }
         }
