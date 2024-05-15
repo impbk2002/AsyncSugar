@@ -14,7 +14,8 @@ internal protocol NonThrowingAsyncIteratorProtocol<Element>: AsyncIteratorProtoc
     mutating func next() async -> Element?
     
 }
-
+internal protocol NonThrowingAsyncSequence<Element>: AsyncSequence where AsyncIterator:NonThrowingAsyncIteratorProtocol<Element> {
+}
 public protocol AsyncTypedSequence<Element>:AsyncSequence {}
 
 @available(iOS 15.0, macOS 12.0, macCatalyst 15.0, tvOS 15.0, watchOS 8.0, *)
@@ -22,7 +23,8 @@ extension AsyncThrowingPublisher: AsyncTypedSequence {}
 
 @available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *)
 extension AsyncPublisher.Iterator: NonThrowingAsyncIteratorProtocol {}
-
+extension AsyncStream.Iterator: NonThrowingAsyncIteratorProtocol {}
+extension AsyncStream: NonThrowingAsyncSequence {}
 public struct WrappedAsyncSequence<Element>:AsyncSequence {
     
     public func makeAsyncIterator() -> Iterator {
