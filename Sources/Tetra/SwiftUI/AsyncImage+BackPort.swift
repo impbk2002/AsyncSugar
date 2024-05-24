@@ -79,7 +79,11 @@ public struct CompatAsyncImage<Content: View>: View {
             fallthrough
         case .empty:
             do {
-                let (location, _) = try await URLSession.shared.download(from: url)
+                let (location, _) =  if #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, visionOS 1.0, *) {
+                   try await URLSession.shared.download(from: url)
+                } else {
+                    try await TetraExtension(base: URLSession.shared).download(from: url)
+                }
                 let image:CGImage?
                 #if canImport(CoreImage)
                 image = CIImage(contentsOf: location)?.cgImage
