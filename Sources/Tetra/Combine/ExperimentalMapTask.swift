@@ -35,6 +35,7 @@ extension ThrowingTaskGroup: CompatThrowingDiscardingTaskGroup where ChildTaskRe
 
 /**
     Manage Multiple Child Task. provides similair behavior of `flatMap`'s `maxPublisher`
+    
     precondition `maxTasks` must be none zero value
  */
 internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
@@ -77,6 +78,8 @@ extension MultiMapTask: Sendable where Upstream: Sendable {}
 extension MultiMapTask {
     
     internal struct DelegateState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
+        
+        typealias AsyncSequenceSource = AsyncStream<Result<Upstream.Output,Failure>>
         
         let demandState: some UnfairStateLock<PendingDemandState> = createCheckedStateLock(checkedState: PendingDemandState(taskCount: 0, pendingDemand: .none))
         let subscriberState: some UnfairStateLock<S?> = createUncheckedStateLock(uncheckedState: .none)
@@ -144,7 +147,16 @@ extension MultiMapTask {
         }
         
         func dropSubscriber() {
-            subscriberState.withLock{ $0 = nil }
+            // prevent the deinit while holding the lock
+            let subscriber = subscriberState.withLock{
+                let old = $0
+                $0 = nil
+                return old
+            }
+            
+            withExtendedLifetime(subscriber) {
+                
+            }
         }
         
         func receiveValue(_ value:Output) -> Subscribers.Demand? {
@@ -198,18 +210,18 @@ extension MultiMapTask {
             buffer.close()
         }
         
-        static func makeStream(
-            upstream:Upstream,
-            receiveSubscription: @escaping (any Subscription) -> Void,
-            onCancel: @escaping @Sendable () -> Void
-        ) -> AsyncStream<Result<Upstream.Output,Failure>> {
-            return .init { continuation in
-                continuation.onTermination = { _ in
-                    onCancel()
-                }
-                upstream.subscribe(
+        func makeSource(
+            upstream:Upstream
+        ) async -> (AsyncSequenceSource, Subscription)? {
+            let subscriptionLock = createCheckedStateLock(checkedState: SubscriptionContinuation.waiting)
+            let (stream, continuation) = AsyncSequenceSource.makeStream()
+            continuation.onTermination = { _ in
+                buffer.close()
+            }
+            upstream
+                .subscribe(
                     AnySubscriber(
-                        receiveSubscription: receiveSubscription,
+                        receiveSubscription: subscriptionLock.received,
                         receiveValue: {
                             continuation.yield(.success($0))
                             return .none
@@ -225,8 +237,15 @@ extension MultiMapTask {
                         }
                     )
                 )
+            guard let subscription = await subscriptionLock.consumeSubscription()
+            else {
+                continuation.finish()
+                return nil
             }
+
+            return (stream, subscription)
         }
+        
     }
     
     private final class Inner:Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible  {
@@ -249,9 +268,7 @@ extension MultiMapTask {
             demander = buffer
             let state = DelegateState(buffer: buffer, maxTasks: maxTasks, subscriber: subscriber, transform: transform)
             task = Task {
-                let subscriptionLock = createCheckedStateLock(checkedState: SubscriptionContinuation.waiting)
-                let stream = DelegateState<S>.makeStream(upstream: upstream, receiveSubscription: subscriptionLock.received, onCancel: { buffer.close() })
-                guard let subscription = await subscriptionLock.consumeSubscription()
+                guard let (stream, subscription) = await state.makeSource(upstream: upstream)
                 else { return }
                 await withTaskCancellationHandler {
                     if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
