@@ -8,7 +8,7 @@
 import Foundation
 import Dispatch
 
-public extension Task where Success == Never, Failure == Never {
+public extension TetraExtension where Base == Task<Never,Never> {
     
     /**
      Suspends the current task until the given deadline within a tolerance.
@@ -16,8 +16,9 @@ public extension Task where Success == Never, Failure == Never {
         - Throws: `CancellationError` if task is cancelled
      */
     @inlinable
-    static func sleep(until deadline:DispatchTime, tolerance:DispatchTimeInterval? = nil) async throws {
+    static func sleep(deadline: DispatchTime, tolerance: DispatchTimeInterval? = nil) async throws {
         let source = DispatchSource.makeTimerSource(flags: [.strict])
+        
         source.schedule(deadline: deadline, repeating: .never, leeway: tolerance ?? .nanoseconds(0))
         try await dispatchTimerSleep(source: source)
     }
@@ -28,7 +29,7 @@ public extension Task where Success == Never, Failure == Never {
         - Throws: `CancellationError` if task is cancelled
      */
     @inlinable
-    static func sleep(until wallDeadline:DispatchWallTime, tolerance:DispatchTimeInterval? = nil) async throws {
+    static func sleep(wallDeadline: DispatchWallTime, tolerance: DispatchTimeInterval? = nil) async throws {
         let source = DispatchSource.makeTimerSource(flags: [.strict])
         source.schedule(wallDeadline: wallDeadline, repeating: .never, leeway: tolerance ?? .nanoseconds(0))
         try await dispatchTimerSleep(source: source)
