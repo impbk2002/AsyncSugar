@@ -132,7 +132,7 @@ extension AsyncSequencePublisher {
         }
         
         deinit { task.cancel() }
-        
+    }
     
     
 }
