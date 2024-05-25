@@ -30,35 +30,45 @@ final class MultiMapTaskTests: XCTestCase {
         XCTAssertEqual(input, buffer)
     }
     
-    func testSerialCancel() async throws {
+    func testSerialCancel() throws {
         let input = (0..<100)
-        let delay = 1_000_000 as UInt64
+        let holder = UnsafeCancellableHolder()
+        let target = try XCTUnwrap(input.randomElement())
+        let lock = NSRecursiveLock()
         let expect = expectation(description: "task cancellation")
         let pub = MultiMapTask(maxTasks: .max(1), upstream: input.publisher) { value in
-            try? await Task.sleep(nanoseconds: delay)
-            if Task.isCancelled {
-                expect.fulfill()
+            if value == target {
+                await withUnsafeContinuation {
+                    lock.withLock {
+                        holder.bag.removeAll()
+                    }
+                    $0.resume()
+                }
+                XCTAssertTrue(Task.isCancelled)
             }
             return .success(value)
+        }.handleEvents(
+            receiveCancel: { expect.fulfill() }
+        )
+        lock.withLock {
+            pub.sink { _ in
+                XCTFail()
+            } receiveValue: {
+                XCTAssertLessThanOrEqual($0, target)
+            }.store(in: &holder.bag)
         }
-        var bag = Set<AnyCancellable>()
-        pub.sink { _ in
-            
-        } receiveValue: { _ in
 
-        }.store(in: &bag)
-        try await Task.sleep(nanoseconds: 2 * delay)
-        bag.removeAll()
-        await fulfillment(of: [expect], timeout: 0.5)
+
+        wait(for: [expect], timeout: 0.5)
     }
     
-    func testSerialFailure() async throws {
-        let upstream = (0..<100).publisher.setFailureType(to: CancellationError.self)
-        let delay = 1_000_000 as UInt64
+    func testSerialFailure() throws {
+        let sequence = (0..<100)
+        let target = try XCTUnwrap(sequence.randomElement())
+        let upstream = sequence.publisher.setFailureType(to: CancellationError.self)
         let expect = expectation(description: "task failure")
         let pub = MultiMapTask(maxTasks: .max(1), upstream: upstream, transform: { value in
-            try? await Task.sleep(nanoseconds: delay)
-            if value == 33 {
+            if value == target {
                 return .failure(CancellationError()) as Result<Int,CancellationError>
             }
             return .success(value) as Result<Int,CancellationError>
@@ -67,14 +77,14 @@ final class MultiMapTaskTests: XCTestCase {
         pub.sink { completion in
             switch completion {
             case .finished:
-                break
+                XCTFail()
             case .failure(_):
                 expect.fulfill()
             }
-        } receiveValue: { _ in
+        } receiveValue: {
+            XCTAssertLessThanOrEqual($0, target)
         }.store(in: &bag)
-        try await Task.sleep(nanoseconds: 2 * delay)
-        await fulfillment(of: [expect], timeout: 0.5)
+        wait(for: [expect], timeout: 0.5)
         bag.removeAll()
     }
     
