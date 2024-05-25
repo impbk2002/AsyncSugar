@@ -148,14 +148,10 @@ extension MultiMapTask {
         
         func dropSubscriber() {
             // prevent the deinit while holding the lock
-            let subscriber = subscriberState.withLock{
+            let _ = subscriberState.withLock{
                 let old = $0
                 $0 = nil
                 return old
-            }
-            
-            withExtendedLifetime(subscriber) {
-                
             }
         }
         
@@ -203,10 +199,8 @@ extension MultiMapTask {
                     if !flag {
                         break
                     }
-                
                 }
             }
-            receiveComplete(.finished)
             buffer.close()
         }
         
@@ -288,7 +282,7 @@ extension MultiMapTask {
                             await subTask
                         }
                     }
-
+                    state.receiveComplete(.finished)
                 } onCancel: {
                     subscription.cancel()
                     state.dropSubscriber()
