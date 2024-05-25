@@ -33,7 +33,9 @@ let package = Package(
         ),
         .testTarget(
             name: "TetraTests",
-            dependencies: ["Tetra"],
+            dependencies: [
+                "Tetra"
+            ],
             resources: [.process("Resources")]
         )
     ]
