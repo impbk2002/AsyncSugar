@@ -16,8 +16,11 @@ final class TryMapTaskTests: XCTestCase {
         let input = (0..<100).map{ $0 }
         let expect = expectation(description: "completion")
         var buffer = [Int]()
-
-        let cancellable = TryMapTask(upstream: input.publisher) {
+        var demandHistory = [Subscribers.Demand]()
+        let publisher = input.publisher.handleEvents(
+            receiveRequest: { demandHistory.append($0) }
+        )
+        let cancellable = TryMapTask(upstream: publisher) {
             await Task.yield()
             return $0
         }.sink { _ in
@@ -28,6 +31,7 @@ final class TryMapTaskTests: XCTestCase {
         wait(for: [expect], timeout: 0.5)
         cancellable.cancel()
         XCTAssertEqual(input, buffer)
+        XCTAssertEqual(demandHistory, .init(repeating: .max(1), count: 100))
     }
     
     func testCancel() throws {

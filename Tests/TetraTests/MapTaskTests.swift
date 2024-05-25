@@ -15,10 +15,16 @@ final class MapTaskTests: XCTestCase {
     nonisolated
     func testSerial() throws {
         let input = (0..<100).map{ $0 }
+        var demandHistory = [Subscribers.Demand]()
         let expect = expectation(description: "completion")
         var buffer = [Int]()
-
-        let cancellable = MapTask(upstream: input.publisher) {
+        let publisher = input.publisher
+            .handleEvents(
+                receiveRequest: {
+                    demandHistory.append($0)
+                }
+            )
+        let cancellable = MapTask(upstream: publisher) {
             await Task.yield()
             return $0
         }.sink { _ in
@@ -29,6 +35,7 @@ final class MapTaskTests: XCTestCase {
         wait(for: [expect], timeout: 0.5)
         cancellable.cancel()
         XCTAssertEqual(input, buffer)
+        XCTAssertEqual(demandHistory, .init(repeating: .max(1), count: 100))
     }
     
     nonisolated
@@ -38,7 +45,8 @@ final class MapTaskTests: XCTestCase {
         let holder = UnsafeCancellableHolder()
         let lock = NSRecursiveLock()
         let expect = expectation(description: "task cancellation")
-        let pub = MapTask(upstream: input.publisher) { value in
+        
+        let mapTask = MapTask(upstream: input.publisher) { value in
             if value == target {
                 await withUnsafeContinuation{
                     lock.withLock {
@@ -53,7 +61,7 @@ final class MapTaskTests: XCTestCase {
             receiveCancel: { expect.fulfill() }
         )
         lock.withLock {
-            pub.sink { _ in
+            mapTask.sink { _ in
                 XCTFail()
             } receiveValue: {
                 XCTAssertLessThanOrEqual($0, target)
