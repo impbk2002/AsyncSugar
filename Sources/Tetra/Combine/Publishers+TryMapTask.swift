@@ -121,8 +121,8 @@ extension TryMapTask {
                     for await demand in demandBuffer {
                         var pending = demand
                         while pending > .none {
-                            subscription.request(pending)
-                            pending = .none
+                            subscription.request(.max(1))
+                            pending -= 1
                             guard
                                 let value = try await iterator.next(),
                                 let demand = receive(value)
