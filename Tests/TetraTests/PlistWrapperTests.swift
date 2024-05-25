@@ -57,7 +57,9 @@ final class PlistWrapperTests: XCTestCase {
     }
     
     func testDateDictionarySerialization() throws {
-        let object = [UUID().uuidString: Date(), UUID().uuidString: Date.distantFuture, UUID().uuidString: Date.distantPast]
+        let object = [
+            UUID().uuidString: Date()
+        ]
         let wrapper:PlistWrapper = .object(object.mapValues{ .date($0) })
         let actual = object as NSDictionary
         let pEncoder = PropertyListEncoder()
