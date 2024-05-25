@@ -12,6 +12,22 @@ import Combine
  
     underlying task will receive task cancellation signal if the subscription is cancelled
  
+    
+    **There is an issue when using with PassthroughSubject or CurrentValueSubject**
+ 
+    - Since Swift does not support running Task inline way (run in sync until suspension point), Subject's value can lost.
+    - Use the workaround like below to prevent this kind of issue
+ 
+```
+    import Combine
+
+    let subject = PassthroughSubject<Int,Never>()
+    subject.flatMap(maxPublishers: .max(1)) { value in
+        Just(value).mapTask{ \**do async job**\ }
+    }
+        
+ ```
+ 
  */
 public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
 

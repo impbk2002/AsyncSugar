@@ -132,3 +132,11 @@ struct ContentView: View {
 ```
 </details>
 
+
+## Known Issues
+
+`MapTask` and `TryMapTask` could lose the value when using with `PublishSubject` or `CurrentValueSubject`
+
+- This is because, Swift does not allow running task inline(run task until reaching suspending point)
+
+- To fix this issue, use `MapTask` or `TryMapTask` inside the `FlatMap`
