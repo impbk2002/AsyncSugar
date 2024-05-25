@@ -59,9 +59,8 @@ class SimpleHTTPServer {
                 return
             }
             if let data = data, !data.isEmpty {
-                if let _ = String(data: data, encoding: .utf8) {
-                    server.sendResponse(connection: connection)
-                }
+                let _ = String(decoding: data, as: UTF8.self)
+                server.sendResponse(connection: connection)
             }
             if isComplete {
                 connection.cancel()
