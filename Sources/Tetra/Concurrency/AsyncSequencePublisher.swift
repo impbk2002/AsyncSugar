@@ -76,8 +76,7 @@ extension AsyncSequencePublisher {
         func startTask(_ source:consuming Base) async {
             var iterator = source.makeAsyncIterator()
             do {
-                for await demand in demandBuffer {
-                    var pending = demand
+                for await var pending in demandBuffer {
                     while pending > .none {
                         if let value = try await iterator.next() {
                             pending -= 1

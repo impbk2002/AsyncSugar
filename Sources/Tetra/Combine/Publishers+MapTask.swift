@@ -132,8 +132,11 @@ extension MapTask {
         ) async {
             await withTaskCancellationHandler {
                 var iterator = source.makeAsyncIterator()
-                for await demand in demandBuffer {
-                    var pending = demand
+                for await var pending in demandBuffer {
+                    if pending == .none {
+                        subscription.request(.none)
+                        continue
+                    }
                     while pending > .none {
                         pending -= 1
                         subscription.request(.max(1))

@@ -110,9 +110,7 @@ extension MultiMapTask {
             reduce:Bool = false
         ){
             if maxTasks == .unlimited {
-                if demand > .none {
-                    subscription.request(demand)
-                }
+                subscription.request(demand)
             } else {
                 let newDemand = demandState.withLock{
                     if reduce {
@@ -140,9 +138,7 @@ extension MultiMapTask {
                         return snapShot
                     }
                 }
-                if newDemand > .none {
-                    subscription.request(newDemand)
-                }
+                subscription.request(newDemand)
             }
         }
         

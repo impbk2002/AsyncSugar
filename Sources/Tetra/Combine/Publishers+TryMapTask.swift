@@ -118,8 +118,11 @@ extension TryMapTask {
             await withTaskCancellationHandler {
                 var iterator = source.makeAsyncIterator()
                 do {
-                    for await demand in demandBuffer {
-                        var pending = demand
+                    for await var pending in demandBuffer {
+                        if pending == .none {
+                            subscription.request(.none)
+                            continue
+                        }
                         while pending > .none {
                             subscription.request(.max(1))
                             pending -= 1
