@@ -1,4 +1,4 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 5.9
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -11,6 +11,7 @@ let package = Package(
         .tvOS(.v13),
         .macOS(.v10_15),
         .watchOS(.v6),
+        .visionOS(.v1)
     ],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
@@ -32,7 +33,9 @@ let package = Package(
         ),
         .testTarget(
             name: "TetraTests",
-            dependencies: ["Tetra"],
+            dependencies: [
+                "Tetra"
+            ],
             resources: [.process("Resources")]
         )
     ]

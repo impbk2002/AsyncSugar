@@ -12,8 +12,8 @@ final class JsonWrapperTests: XCTestCase {
 
 
     func testMappingPerformance() throws {
-        let json1 = try Data(contentsOf: Bundle.module.url(forResource: "JsonSample1", withExtension: "json").unsafelyUnwrapped)
-        let json2 = try Data(contentsOf: Bundle.module.url(forResource: "JsonSample2", withExtension: "json").unsafelyUnwrapped)
+//        let json1 = try Data(contentsOf: Bundle.module.url(forResource: "JsonSample1", withExtension: "json").unsafelyUnwrapped)
+//        let json2 = try Data(contentsOf: Bundle.module.url(forResource: "JsonSample2", withExtension: "json").unsafelyUnwrapped)
         let json3 = try Data(contentsOf: Bundle.module.url(forResource: "JsonSample3", withExtension: "json").unsafelyUnwrapped)
         measure {
 
