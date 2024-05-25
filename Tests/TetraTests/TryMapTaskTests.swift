@@ -1,8 +1,8 @@
 //
-//  MapTaskTests.swift
+//  TryMapTaskTests.swift
 //  
 //
-//  Created by 박병관 on 5/24/24.
+//  Created by 박병관 on 5/25/24.
 //
 
 import XCTest
@@ -10,15 +10,14 @@ import XCTest
 import Combine
 
 
-final class MapTaskTests: XCTestCase {
+final class TryMapTaskTests: XCTestCase {
 
-    nonisolated
     func testSerial() throws {
         let input = (0..<100).map{ $0 }
         let expect = expectation(description: "completion")
         var buffer = [Int]()
 
-        let cancellable = MapTask(upstream: input.publisher) {
+        let cancellable = TryMapTask(upstream: input.publisher) {
             await Task.yield()
             return $0
         }.sink { _ in
@@ -31,12 +30,11 @@ final class MapTaskTests: XCTestCase {
         XCTAssertEqual(input, buffer)
     }
     
-    nonisolated
     func testCancel() async throws {
         let input = (0..<100)
         let delay = 1_000_000 as UInt64
         let expect = expectation(description: "task cancellation")
-        let pub = MapTask(upstream: input.publisher) { value in
+        let pub = TryMapTask(upstream: input.publisher) { value in
             try? await Task.sleep(nanoseconds: delay)
             if Task.isCancelled {
                 expect.fulfill()
@@ -54,18 +52,17 @@ final class MapTaskTests: XCTestCase {
         await fulfillment(of: [expect], timeout: 0.5)
     }
     
-    nonisolated
     func testFailure() async throws {
         let upstream = (0..<100).publisher.setFailureType(to: CancellationError.self)
         let delay = 1_000_000 as UInt64
         let expect = expectation(description: "task failure")
-        let pub = MapTask(upstream: upstream, handler: { value in
-            try? await Task.sleep(nanoseconds: delay)
+        let pub = TryMapTask(upstream: upstream) { value in
+            try await Task.sleep(nanoseconds: delay)
             if value == 33 {
-                return .failure(CancellationError()) as Result<Int,CancellationError>
+                throw CancellationError()
             }
-            return .success(value) as Result<Int,CancellationError>
-        })
+            return value
+        }
         var bag = Set<AnyCancellable>()
         pub.sink { completion in
             switch completion {
@@ -80,6 +77,5 @@ final class MapTaskTests: XCTestCase {
         await fulfillment(of: [expect], timeout: 0.5)
         bag.removeAll()
     }
-    
 
 }
