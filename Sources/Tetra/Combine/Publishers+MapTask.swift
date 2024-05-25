@@ -28,9 +28,9 @@ public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upst
         }
     }
     
-    public init(upstream: Upstream, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
+    public init(upstream: Upstream, handler: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
         self.upstream = upstream
-        self.transform = transform
+        self.transform = handler
     }
 
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
