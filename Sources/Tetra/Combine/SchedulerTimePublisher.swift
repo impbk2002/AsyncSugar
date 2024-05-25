@@ -102,11 +102,13 @@ public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
         }
         
         func cancel() {
-            let token = lock.withLockUnchecked{
+            let (_, token) = lock.withLockUnchecked{
                 let cancellable = $0.token
                 $0.token = .finished
                 $0.request = .none
-                return cancellable
+                let sub = $0.subscriber
+                $0.subscriber = nil
+                return (sub, cancellable)
             }
             if case let .cancellable(cancellable) = token {
                 cancellable.cancel()

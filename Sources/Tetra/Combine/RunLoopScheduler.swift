@@ -46,6 +46,7 @@ public final class RunLoopScheduler: Scheduler, @unchecked Sendable, Hashable {
 
     deinit {
         CFRunLoopSourceInvalidate(source)
+        CFRunLoopWakeUp(cfRunLoop)
     }
 
     public init(async: Void = (), config: Configuration = .init()) async {

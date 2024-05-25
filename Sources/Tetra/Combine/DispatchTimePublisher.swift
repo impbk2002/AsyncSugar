@@ -109,9 +109,11 @@ extension DispatchTimePublisher {
         }
         
         func cancel() {
-            lock.withLock {
+            let _ = lock.withLock {
                 $0.request = .none
+                let sub = $0.subscriber
                 $0.subscriber = nil
+                return sub
             }
             source.cancel()
             source.setEventHandler(handler: nil)
