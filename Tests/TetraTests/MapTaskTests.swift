@@ -98,5 +98,65 @@ final class MapTaskTests: XCTestCase {
         bag.removeAll()
     }
     
+    func testDedicate() throws {
+        let subject = PassthroughSubject<Int,Never>()
+        let completion = expectation(description: "completion")
+        var outputHandle: (Int) -> Void = { _ in }
+        var demandHandle: (Subscribers.Demand) -> Void = {
+            XCTAssertEqual($0, .unlimited)
+        }
+        let warmup = expectation(description: "warmpup")
+        
+        let cancellable = subject
+            .handleEvents(
+                receiveRequest: {
+                    XCTAssertEqual($0, .max(1))
+                }
+            )
+            .mapTask { value in
+                return value
+            }
+            .handleEvents(
+            receiveSubscription: { subscription in
+                warmup.fulfill()
+                XCTAssertEqual("\(subscription)", "MapTask")
+            },
+            receiveOutput: { value in
+                outputHandle(value)
+                outputHandle = { _ in }
+            },
+            receiveCompletion: { comp in
+                completion.fulfill()
+            },
+            receiveCancel: { XCTFail("cancellation is not a valid case") },
+            receiveRequest: {
+                demandHandle($0)
+            }
+        ).sink { _ in }
+        wait(for: [warmup], timeout: 0.5)
+        demandHandle = {
+            XCTAssertEqual($0, .none)
+        }
+        defer {
+            subject.send(completion: .finished)
+            wait(for: [completion], timeout: 3)
+            cancellable.cancel()
+        }
+        
+        for _ in 0..<100 {
+            let value = try XCTUnwrap((0..<19).randomElement())
+            let expectValue = expectation(description: "receive \(value)")
+            outputHandle = {
+                XCTAssertEqual(value, $0)
+                expectValue.fulfill()
+            }
+            demandHandle = {
+                XCTAssertEqual($0, .none)
+            }
+            subject.send(value)
+            wait(for: [expectValue], timeout: 0.3)
+        }
+    }
+    
 
 }

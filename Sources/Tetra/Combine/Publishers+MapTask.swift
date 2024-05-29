@@ -17,6 +17,8 @@ import Combine
  
     - Since Swift does not support running Task inline way (run in sync until suspension point), Subject's value can lost.
     - Use the workaround like below to prevent this kind of issue
+    - wrap the mapTask with `flatMap` or use `buffer` before `mapTask`
+
  
 ```
     import Combine
@@ -25,6 +27,8 @@ import Combine
     subject.flatMap(maxPublishers: .max(1)) { value in
         Just(value).mapTask{ \**do async job**\ }
     }
+    subject.buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
+        .mapTask{ \**do async job**\ }
         
  ```
  
@@ -50,12 +54,12 @@ public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upst
     }
 
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
-        subscriber
-            .receive(
-                subscription: Inner(
-                    upstream: upstream, subscriber: subscriber, transform: transform
-                )
-            )
+        let processor = Processor(subscriber: subscriber, transform: transform)
+        let task = Task {
+            await processor.run()
+        }
+        processor.resumeCondition(task)
+        upstream.subscribe(processor)
     }
     
 }
@@ -65,162 +69,206 @@ extension MapTask: Sendable where Upstream: Sendable {}
 extension MapTask {
     
     
-    internal struct SubscriptionState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
+    struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
         
-        typealias AsyncSequenceSource = AsyncMapSequence<AsyncStream<Result<Upstream.Output,Failure>>,Result<Output,Failure>>
-        private let lock: some UnfairStateLock<S?> = createCheckedStateLock(checkedState: nil)
-        private let demandBuffer:DemandAsyncBuffer
+        var subscriber:S? = nil
+        var upstreamSubscription = SubscriptionContinuation.waiting
+        var condition = TaskValueContinuation.waiting
+    }
+    
+    struct Processor<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
-        init(demandBuffer: DemandAsyncBuffer, subscriber:S) {
-            self.demandBuffer = demandBuffer
-            self.lock.withLockUnchecked{ $0 = subscriber }
+        let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
+        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        let state: some UnfairStateLock<TaskState<S>> = createCheckedStateLock(checkedState: .init())
+        let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+        let combineIdentifier = CombineIdentifier()
+        
+        init(
+            subscriber:S,
+            transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+        ) {
+            self.transform = transform
+            state.withLock{ $0.subscriber = subscriber }
         }
         
-        func receive(_ input: S.Input) -> Subscribers.Demand? {
-            lock.withLockUnchecked{
-                $0
-            }?.receive(input)
-        }
-        
-        func receive(completion: Subscribers.Completion<Failure>) {
-            lock.withLockUnchecked{
-                let old = $0
-                $0 = nil
-                return old
-            }?.receive(completion: completion)
-        }
-        
-        func dropSubscriber() {
-            let _ = lock.withLockUnchecked{
-                let old = $0
-                $0 = nil
+        func send(completion: Subscribers.Completion<Failure>?) {
+            let subscriber = state.withLockUnchecked{
+                let old = $0.subscriber
+                $0.subscriber = nil
                 return old
             }
+            if let completion {
+                subscriber?.receive(completion: completion)
+            }
         }
         
-        func makeSource(
-            upstream:Upstream,
-            transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>
-        ) async -> (AsyncSequenceSource, Subscription)? {
-            let subscriptionLock = createCheckedStateLock(checkedState: SubscriptionContinuation.waiting)
-            let (stream, continuation) = AsyncStream<Result<Upstream.Output,Failure>>.makeStream()
-            continuation.onTermination = { _ in
-                demandBuffer.close()
+        func send(_ value:Output) -> Subscribers.Demand? {
+            state.withLockUnchecked{
+                $0.subscriber
+            }?.receive(value)
+        }
+
+        func terminateStream() {
+            demandSource.continuation.finish()
+            valueSource.continuation.finish()
+        }
+        
+        func waitForUpStream() async -> (any Subscription)? {
+            await withTaskCancellationHandler {
+                await withUnsafeContinuation { coninuation in
+                    state.withLock{
+                        $0.upstreamSubscription.transition(.suspend(coninuation))
+                    }?.run()
+                }
+            } onCancel: {
+                state.withLock{
+                    $0.upstreamSubscription.transition(.cancel)
+                }?.run()
             }
-            upstream
-                .subscribe(
-                    AnySubscriber(
-                        receiveSubscription: subscriptionLock.received,
-                        receiveValue: {
-                            continuation.yield(.success($0))
-                            return .none
-                        },
-                        receiveCompletion: {
-                            switch $0 {
-                            case .finished:
-                                break
-                            case .failure(let error):
-                                continuation.yield(.failure(error))
-                            }
-                            continuation.finish()
-                        }
-                    )
-                )
-            guard let subscription = await subscriptionLock.consumeSubscription()
-            else {
-                continuation.finish()
-                return nil
+        }
+        
+        func resumeCondition(_ task:Task<Void,Never>) {
+            state.withLock{
+                $0.condition.transition(.resume(task))
+            }?.run()
+        }
+        
+        func waitForCondition() async throws {
+            try await withUnsafeThrowingContinuation{ continuation in
+                state.withLock{
+                    $0.condition.transition(.suspend(continuation))
+                }?.run()
             }
-            let source = stream.map{
+        }
+        
+        func clearCondition() {
+            state.withLock{
+                $0.condition.transition(.finish)
+            }?.run()
+        }
+        
+        func run() async {
+            let token:Void? = try? await waitForCondition()
+            if token == nil {
+                withUnsafeCurrentTask{
+                    $0?.cancel()
+                }
+            }
+            defer {
+                clearCondition()
+            }
+            let subscription = await waitForUpStream()
+            state.withLockUnchecked{
+                $0.subscriber
+            }?.receive(subscription: self)
+            guard let subscription else {
+                terminateStream()
+                return
+            }
+            defer { terminateStream() }
+            let stream = valueSource.stream.map{
                 switch $0 {
-                case .success(let success):
-                    return await transform(success)
+                case .success(let value):
+                    return await transform(value)
                 case .failure(let failure):
                     return .failure(failure)
                 }
             }
-            return (source,subscription)
-        }
-        
-        func runTask(
-            _ source:AsyncSequenceSource,
-            _ subscription: any Subscription
-        ) async {
             await withTaskCancellationHandler {
-                var iterator = source.makeAsyncIterator()
-                for await var pending in demandBuffer {
-                    if pending == .none {
+                var iterator = stream.makeAsyncIterator()
+                for await var demand in demandSource.stream {
+                    if demand == .none {
                         subscription.request(.none)
                         continue
                     }
-                    while pending > .none {
-                        pending -= 1
+                    while demand > .none {
+                        demand -= 1
                         subscription.request(.max(1))
-                        guard let result = await iterator.next() else {
-                            return
-                        }
-                        switch result {
+                        switch (await iterator.next()) {
                         case .success(let value):
-                            if let nextDemand = receive(value) {
-                                pending += nextDemand
+                            if let newDemand = send(value) {
+                                demand += newDemand
                             } else {
                                 return
                             }
-                        case .failure(let failure):
-                            receive(completion: .failure(failure))
+                        case .failure(let error):
+                            send(completion: .failure(error))
+                            return
+                        case .none:
+                            send(completion: .finished)
                             return
                         }
                     }
+                    
                 }
             } onCancel: {
                 subscription.cancel()
-                dropSubscriber()
+                send(completion: nil)
             }
-            receive(completion: .finished)
-            demandBuffer.close()
+
         }
-        
         
     }
     
-    private final class Inner<S:Subscriber>:Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible where S.Input == Output, S.Failure == Failure {
-        
-        var description: String { "MapTask" }
-        
-        var playgroundDescription: Any { description }
-        
-        private let task:Task<Void,Never>
-        private let demander:DemandAsyncBuffer
-        
-        // TODO: Replace with Delegating StateHolder
-        fileprivate init(
-            upstream:Upstream,
-            subscriber:S,
-            transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>
-        ) {
-            let buffer = DemandAsyncBuffer()
-            let state = SubscriptionState(demandBuffer: buffer, subscriber: subscriber)
-            demander = buffer
-            task = Task {
-                guard let (stream, subscription) = await state.makeSource(upstream: upstream, transform: transform)
-                else { return }
-                await state.runTask(stream, subscription)
-            }
-        }
-        
-        func cancel() {
-            task.cancel()
-        }
-        
-        func request(_ demand: Subscribers.Demand) {
-            demander.append(element: demand)
-        }
-        
-        deinit { task.cancel() }
-        
+}
 
-
+extension MapTask.Processor: Subscriber {
+    
+    func receive(subscription: any Subscription) {
+        state.withLock{
+            $0.upstreamSubscription.transition(.resume(subscription))
+        }?.run()
     }
+    
+    func receive(_ input: Upstream.Output) -> Subscribers.Demand {
+        let result = valueSource.continuation.yield(.success(input))
+        switch result {
+        case .terminated:
+            break
+        case .enqueued:
+            break
+        case .dropped:
+            preconditionFailure("buffer overflow")
+        @unknown default:
+            fatalError("unknown case")
+        }
+        return .none
+    }
+    
+    func receive(completion: Subscribers.Completion<Upstream.Failure>) {
+        switch completion {
+        case .finished:
+            break
+        case .failure(let failure):
+            valueSource.continuation.yield(.failure(failure))
+        }
+        valueSource.continuation.finish()
+    }
+    
+    
+}
+
+extension MapTask.Processor: Subscription {
+    
+    func cancel() {
+        state.withLock{
+            $0.condition.transition(.cancel)
+        }?.run()
+    }
+    
+    func request(_ demand: Subscribers.Demand) {
+        demandSource.continuation.yield(demand)
+    }
+    
+    
+}
+
+extension MapTask.Processor: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
+    
+    var playgroundDescription: Any { description }
+    
+    var description: String { "MapTask" }
     
 }
 
