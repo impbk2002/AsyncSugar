@@ -113,7 +113,7 @@ struct RefreshActionModifier: EnvironmentalModifier {
         @usableFromInline
         var refreshing:Bool
         @usableFromInline
-        var action:(@Sendable () async -> ())?
+        var action:( () async -> ())?
         
         @usableFromInline
         func body(content: Content) -> some View {
@@ -175,13 +175,13 @@ internal struct ScrollRefreshImp: UIViewRepresentable {
     @usableFromInline
     var refreshing:Bool
     @usableFromInline
-    let operation:@Sendable () async -> Void
+    let operation: () async -> Void
     
     @usableFromInline
     internal init(
         task: Binding<Task<Void, Never>?>,
         refreshing: Bool,
-        operation: @escaping @Sendable () async -> Void
+        operation: @escaping () async -> Void
     ) {
         self._task = task
         self.refreshing = refreshing
@@ -263,7 +263,7 @@ internal final class RefreshingCoordinator: NSObject {
     @usableFromInline
     @objc func refresh() {
         parent.task?.cancel()
-        parent.task = Task(operation: parent.operation)
+        parent.task = Task{  await parent.operation() }
     }
     
 }

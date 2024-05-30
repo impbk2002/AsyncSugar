@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 
 public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
@@ -55,7 +55,7 @@ public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
         
         init(publisher: SchedulerTimePublisher<T>, subscriber:S) {
             self.publisher = publisher
-            lock.withLock{
+            lock.withLockUnchecked {
                 $0.subscriber = subscriber
             }
         }
@@ -69,7 +69,7 @@ public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
                 let token = publisher.scheduler.schedule(after: publisher.scheduler.now, interval: publisher.interval, tolerance: publisher.tolerance ?? publisher.scheduler.minimumTolerance, options: publisher.options) { [weak self] in
                     self?.fire()
                 }
-                let oldValue = lock.withLock{
+                let oldValue = lock.withLockUnchecked{
                     let oldValue = $0.token
                     switch oldValue {
                     case .waiting, .cancellable:

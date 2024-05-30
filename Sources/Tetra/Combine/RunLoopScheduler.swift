@@ -111,6 +111,22 @@ public final class RunLoopScheduler: Scheduler, @unchecked Sendable, Hashable {
         self.config = config
     }
     
+    @usableFromInline
+    struct Block: @unchecked Sendable {
+        
+        let block: () -> Void
+        
+        @usableFromInline
+        func callAsFunction() {
+            block()
+        }
+        
+        @usableFromInline
+        init(block: @escaping () -> Void) {
+            self.block = block
+        }
+        
+    }
 
     @inlinable
     nonisolated
@@ -122,14 +138,15 @@ public final class RunLoopScheduler: Scheduler, @unchecked Sendable, Hashable {
         _ action: @escaping () -> Void
     ) -> Cancellable {
         let timer:Timer
+        let block = Block(block: action)
         if config.keepAliveUntilFinish {
             let observer = createRetainToken()
             timer = .init(fire: date.date, interval: interval.timeInterval, repeats: true) { _ in
                 CFRunLoopObserverInvalidate(observer)
-                action()
+                block()
             }
         } else {
-            timer = .init(fire: date.date, interval: interval.timeInterval, repeats: true) { _ in action() }
+            timer = .init(fire: date.date, interval: interval.timeInterval, repeats: true) { _ in block() }
         }
         timer.tolerance = tolerance.timeInterval
         let cfTimer = timer as CFRunLoopTimer
@@ -148,15 +165,15 @@ public final class RunLoopScheduler: Scheduler, @unchecked Sendable, Hashable {
         _ action: @escaping () -> Void
     ) {
         let timer:Timer
-        
+        let block = Block(block: action)
         if config.keepAliveUntilFinish {
             let observer = createRetainToken()
             timer = .init(fire: date.date, interval: 0, repeats: false) { _ in
                 CFRunLoopObserverInvalidate(observer)
-                action()
+                block()
             }
         } else {
-            timer = .init(fire: date.date, interval: 0, repeats: false) { _ in action() }
+            timer = .init(fire: date.date, interval: 0, repeats: false) { _ in block() }
         }
         timer.tolerance = tolerance.timeInterval
         CFRunLoopAddTimer(cfRunLoop, timer as CFRunLoopTimer, .commonModes)
