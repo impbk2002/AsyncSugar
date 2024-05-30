@@ -20,7 +20,7 @@ public extension AsyncSequence {
 public struct AsyncSequencePublisher<Base:AsyncSequence>: Publisher {
 
     public typealias Output = Base.Element
-    public typealias Failure = Error
+    public typealias Failure = Base.Failure
     
     public var base:Base
     

@@ -23,7 +23,7 @@ internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher whe
 
     public let maxTasks:Subscribers.Demand
     public let upstream:Upstream
-    public let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+    public let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
@@ -65,11 +65,15 @@ extension MultiMapTask {
         let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
         let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
         let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
-        let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+        let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
 
         let combineIdentifier = CombineIdentifier()
         
-        init(maxTasks:Subscribers.Demand, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
+        init(
+            maxTasks:Subscribers.Demand,
+            subscriber:S,
+            transform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> Output
+        ) {
             self.maxTasks = maxTasks
             self.transform = transform
             state.withLockUnchecked{
@@ -95,16 +99,20 @@ extension MultiMapTask {
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
-                        switch await transform(success) {
-                        case .failure(let failure):
-                            send(completion: .failure(failure))
-                            throw CancellationError()
-                        case .success(let value):
+                        var shouldBreak = false
+                        do {
+                            let value = try await transform(success)
                             if let demand = send(value) {
                                 subscription.request(demand)
                             } else {
-                                throw CancellationError()
+                                shouldBreak = true
                             }
+                        } catch {
+                            send(completion: .failure(error))
+                            shouldBreak = true
+                        }
+                        if shouldBreak {
+                            throw CancellationError()
                         }
                     }
                     if !flag {
