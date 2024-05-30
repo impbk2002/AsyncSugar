@@ -109,9 +109,11 @@ extension DispatchTimePublisher {
         }
         
         func cancel() {
-            lock.withLock {
+            let _ = lock.withLockUnchecked {
                 $0.request = .none
+                let sub = $0.subscriber
                 $0.subscriber = nil
+                return sub
             }
             source.cancel()
             source.setEventHandler(handler: nil)
@@ -133,7 +135,7 @@ extension DispatchTimePublisher {
         }
         
         func attach(_ subscriber:S) {
-            lock.withLock {
+            lock.withLockUnchecked {
                 $0.subscriber = subscriber
             }
             subscriber.receive(subscription: self)
@@ -141,7 +143,7 @@ extension DispatchTimePublisher {
         
         func fire(shouldFinish:Bool = false) {
             let time = DispatchTime.now()
-            let sub = lock.withLock{
+            let sub = lock.withLockUnchecked{
                 if $0.request > 0 {
                     $0.request -= 1
                 } else {

@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure == Never {
 
@@ -64,7 +64,7 @@ private final class AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where
     }
     
     func receive(_ input: Input) -> Subscribers.Demand {
-        let snapShot = lock.withLock {
+        let snapShot = lock.withLockUnchecked {
             let oldValue = $0
             switch oldValue.status {
             case .subscribed:
@@ -119,7 +119,7 @@ private final class AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where
     
     
     func cancel() {
-        let (continuations, resource) = lock.withLock {
+        let (continuations, resource) = lock.withLockUnchecked {
             let captured = ($0.pending, $0.status)
             $0.pending = []
             $0.status = .terminal
@@ -137,7 +137,7 @@ private final class AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where
     
     func next() async -> Input? {
         await withUnsafeContinuation { continuation in
-            let subscriptionState = lock.withLock {
+            let subscriptionState = lock.withLockUnchecked {
                 switch $0.status {
                 case .subscribed(_):
                     $0.pending.append(continuation)

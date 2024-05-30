@@ -68,10 +68,12 @@ public final class DispatchQueueExecutor: SerialExecutor {
                 executor.enqueue(ExecutorJob(job))
                 return
             }
+            
             return executor.enqueue(job)
         }
+        let executor = asUnownedSerialExecutor()
         queue.async {
-            job.runSynchronously(on: self.asUnownedSerialExecutor())
+            job.runSynchronously(on: executor)
         }
     }
 #else
@@ -80,8 +82,9 @@ public final class DispatchQueueExecutor: SerialExecutor {
             return executor.enqueue(job)
         }
         let unownedJob = UnownedJob(job)
+        let executor = asUnownedSerialExecutor()
         queue.async {
-            unownedJob.runSynchronously(on: self.asUnownedSerialExecutor())
+            unownedJob.runSynchronously(on: executor)
         }
     }
 #endif

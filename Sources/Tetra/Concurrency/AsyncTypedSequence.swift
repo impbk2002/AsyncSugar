@@ -35,7 +35,7 @@ public struct WrappedAsyncSequence<Element>:AsyncSequence {
     }
     
     public typealias AsyncIterator = Iterator
-    private let builder: @Sendable () -> AsyncIterator
+    private let builder: () -> AsyncIterator
     
     internal init<T:AsyncSequence>(base:T) where T.Element == Element, T.AsyncIterator: NonThrowingAsyncIteratorProtocol {
         builder = { [base] in

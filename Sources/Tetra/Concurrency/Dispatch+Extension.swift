@@ -5,7 +5,7 @@
 //  Created by pbk on 2023/01/26.
 //
 
-import Foundation
+@preconcurrency import Foundation
 import Dispatch
 
 public extension TetraExtension where Base == Task<Never,Never> {

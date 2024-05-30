@@ -5,7 +5,7 @@
 //  Created by 박병관 on 8/20/23.
 //
 
-import Foundation
+@preconcurrency import Foundation
 
 internal struct RunLoopRunner: ~Copyable, @unchecked Sendable {
     
@@ -60,7 +60,7 @@ public final class RunLoopExecutor: SerialExecutor {
     
     public func enqueue(_ job: consuming ExecutorJob) {
         let ref = UnownedJob(job)
-        let executor = self.asUnownedSerialExecutor()
+        let executor = asUnownedSerialExecutor()
         runner.submit {
             ref.runSynchronously(on: executor)
         }
@@ -69,6 +69,10 @@ public final class RunLoopExecutor: SerialExecutor {
     
     public func isSameExclusiveExecutionContext(other: RunLoopExecutor) -> Bool {
         return runner.thread == other.runner.thread
+    }
+    
+    public func checkIsolation() {
+        precondition(runner.thread == Thread.current, "Expected \(runner.thread) but found \(Thread.current)")
     }
     
 
@@ -104,7 +108,7 @@ public final class LegacyRunLoopExecutor: SerialExecutor {
     
     #if os(macOS) || os(tvOS) || os(watchOS) || os(iOS)
     public func enqueue(_ job: UnownedJob) {
-        let executor = UnownedSerialExecutor(ordinary: self)
+        let executor = asUnownedSerialExecutor()
         runner.submit {
             job.runSynchronously(on: executor)
         }

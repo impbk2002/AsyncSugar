@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 import _Concurrency
 
 /**
@@ -16,22 +16,24 @@ import _Concurrency
     **There is an issue when using with PassthroughSubject or CurrentValueSubject**
 
     - Since Swift does not support running Task inline way (run in sync until suspension point), Subject's value can lost.
-    - Use the workaround like below to prevent this kind of issue
+    - wrap the mapTask with `flatMap` or use `buffer` before `mapTask`
 
 ```
  import Combine
 
  let subject = PassthroughSubject<Int,Never>()
  subject.flatMap(maxPublishers: .max(1)) { value in
-     Just(value).mapTask{ \**do async job**\ }
+     Just(value).tryMapTask{ \**do async job**\ }
  }
+ subject.buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
+     .tryMapTask{ \**do async job**\ }
      
 ```
  */
 public struct TryMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
 
     public typealias Output = Output
-    public typealias Failure = Error
+    public typealias Failure = any Error
 
     public let upstream:Upstream
     public var transform:@Sendable (Upstream.Output) async throws -> Output
@@ -42,12 +44,13 @@ public struct TryMapTask<Upstream:Publisher, Output:Sendable>: Publisher where U
     }
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Output == S.Input {
-        subscriber
-            .receive(
-                subscription: Inner(
-                    upstream: upstream, subscriber: subscriber, transform: transform
-                )
-            )
+        let processor = Inner(subscriber: subscriber, transform: transform)
+        let task = Task{
+           await processor.run()
+        }
+        processor.resumeCondition(task)
+        upstream.subscribe(processor)
+        
     }
 
 }
@@ -56,152 +59,199 @@ extension TryMapTask: Sendable where Upstream: Sendable {}
 
 extension TryMapTask {
     
+    internal struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
+        
+        var subscriber:S? = nil
+        var upstreamSubscription = SubscriptionContinuation.waiting
+        var condition = TaskValueContinuation.waiting
+    }
     
-    internal struct SubscriptionState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
+    internal struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
-        typealias AsyncSequenceSource = AsyncThrowingMapSequence<AsyncThrowingStream<Upstream.Output,Failure>, Output>
-        private let lock: some UnfairStateLock<S?> = createCheckedStateLock(checkedState: nil)
-        private let demandBuffer:DemandAsyncBuffer
+        let valueSource = AsyncThrowingStream<Upstream.Output,Failure>.makeStream(bufferingPolicy: .bufferingNewest(2))
+        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
+        let transform:@Sendable (Upstream.Output) async throws -> Output
+        let combineIdentifier = CombineIdentifier()
         
-        init(demandBuffer: DemandAsyncBuffer, subscriber:S) {
-            self.demandBuffer = demandBuffer
-            self.lock.withLockUnchecked{ $0 = subscriber }
+        init(
+            subscriber:S,
+            transform: @escaping @Sendable (Upstream.Output) async throws -> Output
+        ) {
+            
+            self.transform = transform
+            state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
-        func receive(_ input: S.Input) -> Subscribers.Demand? {
-            lock.withLockUnchecked{
-                $0
-            }?.receive(input)
-        }
-        
-        func receive(completion: Subscribers.Completion<Failure>) {
-            lock.withLockUnchecked{ 
-                let old = $0
-                $0 = nil
-                return old
-            }?.receive(completion: completion)
-        }
-        
-        func dropSubscriber() {
-            let _ = lock.withLockUnchecked{
-                let old = $0
-                $0 = nil
+        func send(completion: Subscribers.Completion<Failure>?) {
+            let subscriber = state.withLockUnchecked{
+                let old = $0.subscriber
+                $0.subscriber = nil
                 return old
             }
+            if let completion {
+                subscriber?.receive(completion: completion)
+            }
         }
         
-        func makeSource(
-            upstream:Upstream,
-            transform:@escaping @Sendable (Upstream.Output) async throws -> Output
-        ) async -> (AsyncSequenceSource, Subscription)? {
-            let subscriptionLock = createCheckedStateLock(checkedState: SubscriptionContinuation.waiting)
-            let (stream, continuation) = AsyncThrowingStream<Upstream.Output,Failure>.makeStream()
-            continuation.onTermination = { _ in
-                demandBuffer.close()
-            }
-            upstream
-                .subscribe(
-                    AnySubscriber(
-                        receiveSubscription: subscriptionLock.received,
-                        receiveValue: {
-                            continuation.yield($0)
-                            return .none
-                        },
-                        receiveCompletion: {
-                            switch $0 {
-                            case .finished:
-                                continuation.finish(throwing: .none)
-                            case .failure(let error):
-                                continuation.finish(throwing: error)
-                            }
-                        }
-                    )
-                )
-            guard let subscription = await subscriptionLock.consumeSubscription()
-            else {
-                continuation.finish()
-                return nil
-            }
-            return (stream.map(transform),subscription)
+        func send(_ value:Output) -> Subscribers.Demand? {
+            state.withLockUnchecked{
+                $0.subscriber
+            }?.receive(value)
+        }
+
+        func terminateStream() {
+            demandSource.continuation.finish()
+            valueSource.continuation.finish()
         }
         
-        func runTask(
-            _ source:AsyncSequenceSource,
-            _ subscription: any Subscription
-        ) async {
+        func waitForUpStream() async -> (any Subscription)? {
             await withTaskCancellationHandler {
-                var iterator = source.makeAsyncIterator()
-                do {
-                    for await var pending in demandBuffer {
-                        if pending == .none {
-                            subscription.request(.none)
-                            continue
-                        }
-                        while pending > .none {
-                            subscription.request(.max(1))
-                            pending -= 1
-                            guard
-                                let value = try await iterator.next(),
-                                let demand = receive(value)
-                            else {
+                await withUnsafeContinuation { coninuation in
+                    state.withLockUnchecked {
+                        $0.upstreamSubscription.transition(.suspend(coninuation))
+                    }?.run()
+                }
+            } onCancel: {
+                state.withLockUnchecked{
+                    $0.upstreamSubscription.transition(.cancel)
+                }?.run()
+            }
+        }
+        
+        func resumeCondition(_ task:Task<Void,Never>) {
+            state.withLock{
+                $0.condition.transition(.resume(task))
+            }?.run()
+        }
+        
+        func waitForCondition() async throws {
+            try await withUnsafeThrowingContinuation{ continuation in
+                state.withLock{
+                    $0.condition.transition(.suspend(continuation))
+                }?.run()
+            }
+        }
+        
+        func clearCondition() {
+            state.withLock{
+                $0.condition.transition(.finish)
+            }?.run()
+        }
+        
+        func run() async {
+            let token:Void? = try? await waitForCondition()
+            if token == nil {
+                withUnsafeCurrentTask{
+                    $0?.cancel()
+                }
+            }
+            defer {
+                clearCondition()
+            }
+            let subscription = await waitForUpStream()
+            state.withLockUnchecked{
+                $0.subscriber
+            }?.receive(subscription: self)
+            defer { terminateStream() }
+            guard let subscription else {
+                return
+            }
+            let stream = valueSource.stream.map(transform)
+            await withTaskCancellationHandler {
+                var iterator = stream.makeAsyncIterator()
+                for await var demand in demandSource.stream {
+                    if demand == .none {
+                        subscription.request(.none)
+                        continue
+                    }
+                    while demand > .none {
+                        demand -= 1
+                        subscription.request(.max(1))
+                        do {
+                            guard let value = try await iterator.next() else {
+                                send(completion: .finished)
                                 return
                             }
-                            pending += demand
+                            guard let newDemand = send(value) else {
+                                return
+                            }
+                            demand += newDemand
+                        } catch {
+                            send(completion: .failure(error))
+                            return
                         }
                     }
-                } catch {
-                    receive(completion: .failure(error))
+                    
                 }
             } onCancel: {
                 subscription.cancel()
-                dropSubscriber()
+                send(completion: nil)
             }
-            receive(completion: .finished)
-            demandBuffer.close()
+
         }
-        
         
     }
+ 
     
-    private final class Inner<S:Subscriber>:Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible where S.Input == Output, S.Failure == Failure {
-        
-        var description: String { "TryMapTask" }
-        
-        var playgroundDescription: Any { description }
-        
-        private let task:Task<Void,Never>
-        private let demander:DemandAsyncBuffer
-        
-        // TODO: Replace with Delegating StateHolder
-        fileprivate init(upstream:Upstream, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async throws -> Output) {
-            let buffer = DemandAsyncBuffer()
-            let state = SubscriptionState(demandBuffer: buffer, subscriber: subscriber)
-            demander = buffer
-            task = Task {
-                guard let (stream, subscription) = await state.makeSource(upstream: upstream, transform: transform)
-                else { return }
-                await state.runTask(stream, subscription)
-            }
-        }
-        
-        func cancel() {
-            task.cancel()
-        }
-        
-        func request(_ demand: Subscribers.Demand) {
-            demander.append(element: demand)
-        }
-        
-        deinit {
-            task.cancel()
-        }
-        
+}
 
+extension TryMapTask.Inner: Subscription {
+    
+    func cancel() {
+        state.withLock{
+            $0.condition.transition(.cancel)
+        }?.run()
+    }
+    
+    func request(_ demand: Subscribers.Demand) {
+        demandSource.continuation.yield(demand)
     }
     
 }
 
-extension Publishers {
+extension TryMapTask.Inner: Subscriber {
     
+    func receive(subscription: any Subscription) {
+        state.withLockUnchecked {
+            $0.upstreamSubscription.transition(.resume(subscription))
+        }?.run()
+    }
+    
+    func receive(_ input: Upstream.Output) -> Subscribers.Demand {
+        let result = valueSource.continuation.yield(input)
+        switch result {
+        case .enqueued, .terminated:
+            break
+        case .dropped:
+            preconditionFailure("Buffer overflow")
+        @unknown default:
+            fatalError("unknown case")
+        }
+        return .none
+    }
+    
+    func receive(completion: Subscribers.Completion<Upstream.Failure>) {
+        switch completion {
+        case .finished:
+            valueSource.continuation.finish()
+        case .failure(let failure):
+            valueSource.continuation.finish(throwing: failure)
+        }
+    }
+    
+}
+
+extension TryMapTask.Inner: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
+    
+    var playgroundDescription: Any { description }
+    
+    var description: String { "TryMapTask" }
+    
+}
+
+
+extension Publishers {
+    @available(*, deprecated, renamed: "Tetra.TryMapTask", message: "use TryMapTask directely")
     typealias TryMapTask = Tetra.TryMapTask
 }

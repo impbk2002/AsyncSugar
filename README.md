@@ -139,4 +139,4 @@ struct ContentView: View {
 
 - This is because, Swift does not allow running task inline(run task until reaching suspending point)
 
-- To fix this issue, use `MapTask` or `TryMapTask` inside the `FlatMap`
+- To fix this issue, use `MapTask` or `TryMapTask` inside the `FlatMap` or attach `buffer` before `MapTask` and `TryMapTask`

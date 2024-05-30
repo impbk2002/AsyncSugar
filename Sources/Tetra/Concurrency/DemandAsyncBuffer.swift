@@ -31,7 +31,7 @@ struct DemandAsyncBuffer: AsyncSequence, Sendable {
         continuation = tuple.continuation
     }
     
-    func append(element: __owned Element) {
+    func append(element:  Element) {
         continuation.yield(element)
     }
     

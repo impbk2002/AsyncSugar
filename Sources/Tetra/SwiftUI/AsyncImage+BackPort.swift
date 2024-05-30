@@ -67,7 +67,7 @@ public struct CompatAsyncImage<Content: View>: View {
             Color(white: 0.16)
         }
     }
-    
+    @MainActor
     private func loadImage() async {
         guard let url else {
             phase = .empty
@@ -79,11 +79,7 @@ public struct CompatAsyncImage<Content: View>: View {
             fallthrough
         case .empty:
             do {
-                let (location, _) =  if #available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, macCatalyst 15.0, visionOS 1.0, *) {
-                   try await URLSession.shared.download(from: url)
-                } else {
-                    try await TetraExtension(base: URLSession.shared).download(from: url)
-                }
+                let (location, _) =  try await TetraExtension(base: URLSession.shared).download(from: url)
                 let image:CGImage?
                 #if canImport(CoreImage)
                 image = CIImage(contentsOf: location)?.cgImage
@@ -112,14 +108,14 @@ public struct CompatAsyncImage<Content: View>: View {
             someView
         } else if #available(iOS 14.0, tvOS 14.0, macCatalyst 14.0, watchOS 7.0, macOS 11.0, *) {
             contentOrImage
-                .async(id: url) {
+                .async(id: url) { @MainActor in
                     await loadImage()
                 }
         } else {
             contentOrImage
                 .background(
                     Spacer(minLength: 0)
-                        .async {
+                        .async { @MainActor in
                             await loadImage()
                         }
                         .id(url)
