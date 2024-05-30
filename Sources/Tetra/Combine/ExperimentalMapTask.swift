@@ -26,7 +26,7 @@ internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher whe
     public let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
-        let processor = Processor(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
+        let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
         let task = Task {
             await processor.run()
         }
@@ -59,7 +59,7 @@ extension MultiMapTask {
         var condition = TaskValueContinuation.waiting
     }
     
-    struct Processor<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
+    struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
         let maxTasks:Subscribers.Demand
         let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
@@ -243,7 +243,7 @@ extension MultiMapTask {
 }
 
 
-extension MultiMapTask.Processor: Subscriber {
+extension MultiMapTask.Inner: Subscriber {
     
     func receive(_ input: Upstream.Output) -> Subscribers.Demand {
         valueSource.continuation.yield(.success(input))
@@ -272,7 +272,7 @@ extension MultiMapTask.Processor: Subscriber {
 
 }
 
-extension MultiMapTask.Processor: Subscription {
+extension MultiMapTask.Inner: Subscription {
     
     func request(_ demand: Subscribers.Demand) {
         demandSource.continuation.yield(demand)
@@ -286,7 +286,7 @@ extension MultiMapTask.Processor: Subscription {
     
 }
 
-extension MultiMapTask.Processor: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
+extension MultiMapTask.Inner: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
     
     var description: String { "MultiMapTask" }
     var playgroundDescription: Any { description }

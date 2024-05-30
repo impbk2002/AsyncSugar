@@ -54,7 +54,7 @@ public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upst
     }
 
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
-        let processor = Processor(subscriber: subscriber, transform: transform)
+        let processor = Inner(subscriber: subscriber, transform: transform)
         let task = Task {
             await processor.run()
         }
@@ -76,7 +76,7 @@ extension MapTask {
         var condition = TaskValueContinuation.waiting
     }
     
-    struct Processor<S:Subscriber>: CustomCombineIdentifierConvertible, Sendable where S.Failure == Failure, S.Input == Output {
+    struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible, Sendable where S.Failure == Failure, S.Input == Output {
         
         let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
         let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
@@ -212,7 +212,7 @@ extension MapTask {
     
 }
 
-extension MapTask.Processor: Subscriber {
+extension MapTask.Inner: Subscriber {
     
     func receive(subscription: any Subscription) {
         state.withLockUnchecked {
@@ -248,7 +248,7 @@ extension MapTask.Processor: Subscriber {
     
 }
 
-extension MapTask.Processor: Subscription {
+extension MapTask.Inner: Subscription {
     
     func cancel() {
         state.withLock{
@@ -263,7 +263,7 @@ extension MapTask.Processor: Subscription {
     
 }
 
-extension MapTask.Processor: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
+extension MapTask.Inner: CustomStringConvertible, CustomPlaygroundDisplayConvertible {
     
     var playgroundDescription: Any { description }
     

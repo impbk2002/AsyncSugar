@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 public extension AsyncSequence {
     
@@ -30,7 +30,11 @@ public struct AsyncSequencePublisher<Base:AsyncSequence>: Publisher {
     }
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.Element == S.Input {
-        subscriber.receive(subscription: Inner(base: base, subscriber: subscriber))
+        let processor = Inner(subscriber: subscriber)
+        let task = Task { [base] in
+            await processor.run(base)
+        }
+        processor.resumeCondition(task)
     }
     
 }
@@ -39,99 +43,115 @@ extension AsyncSequencePublisher: Sendable where Base: Sendable, Base.Element: S
 
 extension AsyncSequencePublisher {
     
-    
-    internal struct SubscriptionState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
+    internal struct TaskState<S:Subscriber> where S.Input == Output, S.Failure == Failure {
         
-        private let lock: some UnfairStateLock<S?> = createUncheckedStateLock(uncheckedState: S?.none)
-        private let demandBuffer:DemandAsyncBuffer
-        
-        init( subscriber: S, demand:DemandAsyncBuffer) {
-            self.demandBuffer = demand
-            lock.withLockUnchecked{ $0 = subscriber }
-        }
-        
-        
-        func receive(_ value: S.Input) -> Subscribers.Demand? {
-            lock.withLockUnchecked{ $0 }?.receive(value)
-        }
-        
-        func receive(completion: Subscribers.Completion<S.Failure>) {
-            lock.withLockUnchecked{
-                let oldValue = $0
-                $0 = nil
-                return oldValue
-            }?.receive(completion: completion)
-        }
-        
-        func dropSubscriber() {
-            // try not to dealloc while holding the lock for safety
-            let _ = lock.withLockUnchecked{
-                let oldValue = $0
-                $0 = nil
-                return oldValue
-            }
-
-        }
-        
-        func startTask(_ source:consuming Base) async {
-            var iterator = source.makeAsyncIterator()
-            do {
-                for await var pending in demandBuffer {
-                    while pending > .none {
-                        if let value = try await iterator.next() {
-                            pending -= 1
-                            if let newDemand = receive(value) {
-                                pending += newDemand
-                            } else {
-                                return
-                            }
-                        } else {
-                            receive(completion: .finished)
-                            return
-                        }
-                    }
-                }
-                receive(completion: .finished)
-            } catch {
-                receive(completion: .failure(error))
-            }
-        }
-
+        var subscriber:S? = nil
+        var condition = TaskValueContinuation.waiting
         
     }
-
-    private final class Inner<S:Subscriber>: Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible, Sendable where S.Input == Output, S.Failure == Failure {
+    
+    internal struct Inner<S:Subscriber>: Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible, Sendable where S.Input == Output, S.Failure == Failure {
         
         var description: String { "AsyncSequence" }
         
         var playgroundDescription: Any { description }
+        let combineIdentifier = CombineIdentifier()
+        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        let state:some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         
-        private let task:Task<Void,Never>
-        private let demandBuffer = DemandAsyncBuffer()
-        
-        internal init(base: Base, subscriber:S) {
-            let buffer = demandBuffer
-            let state = SubscriptionState(subscriber: subscriber, demand: buffer)
-            self.task = Task {
-                await withTaskCancellationHandler {
-                    await state.startTask(base)
-                } onCancel: {
-                    state.dropSubscriber()
-                }
-                buffer.close()
+        init(subscriber:S) {
+            state.withLockUnchecked{
+                $0.subscriber = subscriber
             }
         }
-
-        func request(_ demand: Subscribers.Demand) {
-            demandBuffer.append(element: demand)
-        }
+        
         
         func cancel() {
-            task.cancel()
+            state.withLock{
+                return $0.condition.transition(.cancel)
+            }?.run()
         }
         
-        deinit { task.cancel() }
+        func request(_ demand: Subscribers.Demand) {
+            demandSource.continuation.yield(demand)
+        }
+        
+        func send(_ value:S.Input) -> Subscribers.Demand? {
+            state.withLockUnchecked{ $0.subscriber }?.receive(value)
+        }
+        
+        func send(completion: Subscribers.Completion<S.Failure>?) {
+            let subscriber = state.withLockUnchecked{
+                let old = $0.subscriber
+                $0.subscriber = nil
+                return old
+            }
+            if let completion {
+                subscriber?.receive(completion: completion)
+            }
+        }
+        
+        func resumeCondition(_ task:Task<Void,Never>) {
+            state.withLock{
+                $0.condition.transition(.resume(task))
+            }?.run()
+        }
+        
+        func waitForCondition() async throws {
+            try await withUnsafeThrowingContinuation{ continuation in
+                state.withLock{
+                    $0.condition.transition(.suspend(continuation))
+                }?.run()
+            }
+        }
+        
+        func clearCondition() {
+            state.withLock{
+                $0.condition.transition(.finish)
+            }?.run()
+        }
+        
+        func run(_ base:consuming Base) async {
+            let token:Void? = try? await waitForCondition()
+            defer {
+                demandSource.continuation.finish()
+            }
+            if token == nil {
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+            defer { clearCondition() }
+            state.withLockUnchecked{
+                $0.subscriber
+            }?.receive(subscription: self)
+            var iterator = base.makeAsyncIterator()
+            await withTaskCancellationHandler {
+                do {
+                    for await var pending in demandSource.stream {
+                        while pending > .none {
+                            if let value = try await iterator.next() {
+                                pending -= 1
+                                if let newDemand = send(value) {
+                                    pending += newDemand
+                                } else {
+                                    return
+                                }
+                            } else {
+                                send(completion: .finished)
+                                return
+                            }
+                        }
+                    }
+                    send(completion: .finished)
+                } catch {
+                    send(completion: .failure(error))
+                }
+            } onCancel: {
+                demandSource.continuation.finish()
+                send(completion: nil)
+            }
+
+        }
+        
     }
-    
     
 }
