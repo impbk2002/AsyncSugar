@@ -153,11 +153,10 @@ extension TryMapTask {
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
+            defer { terminateStream() }
             guard let subscription else {
-                terminateStream()
                 return
             }
-            defer { terminateStream() }
             let stream = valueSource.stream.map(transform)
             await withTaskCancellationHandler {
                 var iterator = stream.makeAsyncIterator()

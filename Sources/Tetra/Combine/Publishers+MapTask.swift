@@ -159,14 +159,13 @@ extension MapTask {
                 clearCondition()
             }
             let subscription = await waitForUpStream()
+            defer { terminateStream() }
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
             guard let subscription else {
-                terminateStream()
                 return
             }
-            defer { terminateStream() }
             let stream = valueSource.stream.map{
                 switch $0 {
                 case .success(let value):
