@@ -419,7 +419,7 @@ extension PlistWrapper: SerializableMappingProtocol {
             // unknown CF Plist object possibly CFKeyedArchiverUID?
             let typeId = CFGetTypeID(value)
             let typeDescription = CFCopyTypeIDDescription(typeId) as String
-            let instanceDescription = CFCopyDescription(value) as String
+//            let instanceDescription = CFCopyDescription(value) as String
             let context = DecodingError.Context(codingPath: path, debugDescription: "\(typeDescription) is not supported ")
             throw DecodingError.typeMismatch(Self.self, context)
         default:

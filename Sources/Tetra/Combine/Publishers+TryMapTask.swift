@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 import _Concurrency
 
 /**
@@ -70,7 +70,7 @@ extension TryMapTask {
         
         let valueSource = AsyncThrowingStream<Upstream.Output,Failure>.makeStream(bufferingPolicy: .bufferingNewest(2))
         let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state: some UnfairStateLock<TaskState<S>> = createCheckedStateLock(checkedState: .init())
+        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         let transform:@Sendable (Upstream.Output) async throws -> Output
         let combineIdentifier = CombineIdentifier()
         
@@ -80,7 +80,7 @@ extension TryMapTask {
         ) {
             
             self.transform = transform
-            state.withLock{ $0.subscriber = subscriber }
+            state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
         func send(completion: Subscribers.Completion<Failure>?) {
@@ -108,12 +108,12 @@ extension TryMapTask {
         func waitForUpStream() async -> (any Subscription)? {
             await withTaskCancellationHandler {
                 await withUnsafeContinuation { coninuation in
-                    state.withLock{
+                    state.withLockUnchecked {
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
                 }
             } onCancel: {
-                state.withLock{
+                state.withLockUnchecked{
                     $0.upstreamSubscription.transition(.cancel)
                 }?.run()
             }
@@ -213,7 +213,7 @@ extension TryMapTask.Processor: Subscription {
 extension TryMapTask.Processor: Subscriber {
     
     func receive(subscription: any Subscription) {
-        state.withLock{
+        state.withLockUnchecked {
             $0.upstreamSubscription.transition(.resume(subscription))
         }?.run()
     }
@@ -252,6 +252,6 @@ extension TryMapTask.Processor: CustomStringConvertible, CustomPlaygroundDisplay
 
 
 extension Publishers {
-    
+    @available(*, deprecated, renamed: "Tetra.TryMapTask", message: "use TryMapTask directely")
     typealias TryMapTask = Tetra.TryMapTask
 }

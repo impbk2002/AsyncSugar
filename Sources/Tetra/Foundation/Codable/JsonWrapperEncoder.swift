@@ -506,14 +506,18 @@ final class JSONReference {
     static func string(_ str: String) -> JSONReference { .init(.primitive(.string(str))) }
     static func integer<T:FixedWidthInteger>(_ str: T) -> JSONReference { .init(.primitive(.integer(Int(str)))) }
     static func float<T:BinaryFloatingPoint>(_ number:T) -> JSONReference { .init(.primitive(.double(number.isSignalingNaN ? .signalingNaN : Double(number))))}
+    nonisolated(unsafe)
     static let `true` : JSONReference = .init(.primitive(.bool(true)))
+    nonisolated(unsafe)
     static let `false` : JSONReference = .init(.primitive(.bool(false)))
     static func bool(_ b: Bool) -> JSONReference { b ? .true : .false }
     static var emptyArray : JSONReference { .init(.array([])) }
     static var emptyObject : JSONReference { .init(.object([:])) }
+    
     static var emptyContainer: JSONReference {
         let item = JSONReference.null
         item.backing = nil
         return item
     }
+    
 }

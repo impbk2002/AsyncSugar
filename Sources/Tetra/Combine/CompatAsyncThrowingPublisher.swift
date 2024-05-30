@@ -7,7 +7,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
 

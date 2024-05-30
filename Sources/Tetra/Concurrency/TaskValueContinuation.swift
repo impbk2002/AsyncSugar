@@ -8,7 +8,7 @@
 import Foundation
 
 internal
-enum TaskValueContinuation {
+enum TaskValueContinuation: Sendable {
     
     case waiting
     case suspending(UnsafeContinuation<Void,any Error>)
@@ -16,14 +16,14 @@ enum TaskValueContinuation {
     case cancelled
     case finished
     
-    enum Event {
+    enum Event: Sendable {
         case suspend(UnsafeContinuation<Void,any Error>)
         case resume(Task<Void,Never>)
         case finish
         case cancel
     }
     
-    enum Effect {
+    enum Effect: Sendable {
         case raise(UnsafeContinuation<Void,any Error>)
         case resume(UnsafeContinuation<Void,any Error>)
         case cancel(Task<Void,Never>)

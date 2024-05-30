@@ -32,7 +32,7 @@ public extension NotificationCenter {
 @available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *)
 extension NotificationCenter.Notifications.AsyncIterator: NonThrowingAsyncIteratorProtocol {}
 
-public final class NotificationSequence: AsyncSequence {
+public final class NotificationSequence: AsyncSequence, Sendable {
     
     public typealias Element = Notification
     public typealias AsyncIterator = Iterator
@@ -97,7 +97,7 @@ public final class NotificationSequence: AsyncSequence {
     
     @Sendable
     func cancel() {
-        let snapShot = lock.withLock {
+        let snapShot = lock.withLockUnchecked {
             let oldValue = $0
             $0.observer = nil
             $0.buffer = []

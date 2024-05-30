@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 /**
  
@@ -76,11 +76,11 @@ extension MapTask {
         var condition = TaskValueContinuation.waiting
     }
     
-    struct Processor<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
+    struct Processor<S:Subscriber>: CustomCombineIdentifierConvertible, Sendable where S.Failure == Failure, S.Input == Output {
         
         let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
         let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state: some UnfairStateLock<TaskState<S>> = createCheckedStateLock(checkedState: .init())
+        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
         let combineIdentifier = CombineIdentifier()
         
@@ -89,7 +89,7 @@ extension MapTask {
             transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
         ) {
             self.transform = transform
-            state.withLock{ $0.subscriber = subscriber }
+            state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
         func send(completion: Subscribers.Completion<Failure>?) {
@@ -121,8 +121,8 @@ extension MapTask {
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
                 }
-            } onCancel: {
-                state.withLock{
+            } onCancel: { [state] in
+                state.withLockUnchecked{
                     $0.upstreamSubscription.transition(.cancel)
                 }?.run()
             }
@@ -166,7 +166,7 @@ extension MapTask {
             guard let subscription else {
                 return
             }
-            let stream = valueSource.stream.map{
+            let stream = valueSource.stream.map{ [transform] in
                 switch $0 {
                 case .success(let value):
                     return await transform(value)
@@ -215,7 +215,7 @@ extension MapTask {
 extension MapTask.Processor: Subscriber {
     
     func receive(subscription: any Subscription) {
-        state.withLock{
+        state.withLockUnchecked {
             $0.upstreamSubscription.transition(.resume(subscription))
         }?.run()
     }
@@ -273,6 +273,7 @@ extension MapTask.Processor: CustomStringConvertible, CustomPlaygroundDisplayCon
 
 extension Publishers {
     
+    @available(*, deprecated, renamed: "Tetra.TryMapTask", message: "use MapTask directely")
     typealias MapTask = Tetra.MapTask
     
 }

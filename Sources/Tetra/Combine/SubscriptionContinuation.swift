@@ -6,13 +6,13 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 @usableFromInline
 internal enum SubscriptionContinuation {
     
     case waiting
-    case cached(Subscription)
+    case cached(any Subscription)
     case suspending(UnsafeContinuation<Subscription?,Never>)
     case finished
     
@@ -100,32 +100,6 @@ internal enum SubscriptionContinuation {
             return .cancel(unsafeContinuation)
         case .finished:
             return nil
-        }
-    }
-    
-}
-
-internal extension UnfairStateLock where State == SubscriptionContinuation {
-    
-    @usableFromInline
-    func received(_ subscription:Subscription) {
-        withLock {
-            $0.transition(.resume(subscription))
-        }?.run()
-    }
-    
-    @usableFromInline
-    func consumeSubscription() async -> Subscription? {
-        await withTaskCancellationHandler {
-            await withUnsafeContinuation{ continuation in
-                withLock {
-                    $0.transition(.suspend(continuation))
-                }?.run()
-            }
-        } onCancel: {
-            withLock {
-                $0.transition(.cancel)
-            }?.run()
         }
     }
     

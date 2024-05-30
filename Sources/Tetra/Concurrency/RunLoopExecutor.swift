@@ -5,7 +5,7 @@
 //  Created by 박병관 on 8/20/23.
 //
 
-import Foundation
+@preconcurrency import Foundation
 
 internal struct RunLoopRunner: ~Copyable, @unchecked Sendable {
     

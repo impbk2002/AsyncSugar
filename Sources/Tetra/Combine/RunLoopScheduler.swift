@@ -5,7 +5,7 @@
 //  Created by pbk on 2022/12/10.
 //
 
-import Foundation
+@preconcurrency import Foundation
 import Dispatch
 import os
 import Combine

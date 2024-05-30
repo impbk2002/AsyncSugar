@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 
 
@@ -64,7 +64,7 @@ extension MultiMapTask {
         let maxTasks:Subscribers.Demand
         let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
         let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state: some UnfairStateLock<TaskState<S>> = createCheckedStateLock(checkedState: TaskState<S>())
+        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
         let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
 
         let combineIdentifier = CombineIdentifier()
@@ -72,7 +72,7 @@ extension MultiMapTask {
         init(maxTasks:Subscribers.Demand, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
             self.maxTasks = maxTasks
             self.transform = transform
-            state.withLock{
+            state.withLockUnchecked{
                 $0.subscriber = subscriber
             }
         }
@@ -120,7 +120,7 @@ extension MultiMapTask {
         }
         
         func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLock{
+            let subscriber = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
                 return old
@@ -131,7 +131,7 @@ extension MultiMapTask {
         }
         
         func send(_ value: S.Input) -> Subscribers.Demand? {
-            let newDemand = state.withLock{
+            let newDemand = state.withLockUnchecked{
                 $0.subscriber
             }?.receive(value)
             guard let newDemand else { return nil }
@@ -156,12 +156,12 @@ extension MultiMapTask {
         func waitForUpStream() async -> (any Subscription)? {
             await withTaskCancellationHandler {
                 await withUnsafeContinuation { coninuation in
-                    state.withLock{
+                    state.withLockUnchecked{
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
                 }
             } onCancel: {
-                state.withLock{
+                state.withLockUnchecked{
                     $0.upstreamSubscription.transition(.cancel)
                 }?.run()
             }
@@ -215,11 +215,11 @@ extension MultiMapTask {
                         terminateStream()
                     }
                 } else {
-                    await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
-                        let gIterator = group.makeAsyncIterator()
+                    try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
+                        var iterator = group.makeAsyncIterator()
+                        let stream = AsyncThrowingStream(unfolding: { try await iterator.next() })
                         async let subTask:() = {
-                            var iterator = gIterator
-                            while let _ = try? await iterator.next() {
+                            for try await _ in stream {
                                 
                             }
                         }()
@@ -228,7 +228,7 @@ extension MultiMapTask {
                             group: &group
                         )
                         terminateStream()
-                        await subTask
+                        try await subTask
                     }
                 }
                 send(completion: .finished)
@@ -265,7 +265,7 @@ extension MultiMapTask.Processor: Subscriber {
     typealias Failure = Upstream.Failure
     
     func receive(subscription: any Subscription) {
-        state.withLock {
+        state.withLockUnchecked {
             $0.upstreamSubscription.transition(.resume(subscription))
         }?.run()
     }

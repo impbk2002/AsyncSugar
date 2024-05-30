@@ -65,7 +65,7 @@ extension AsyncSequencePublisher {
         
         func dropSubscriber() {
             // try not to dealloc while holding the lock for safety
-            let _ = lock.withLock{
+            let _ = lock.withLockUnchecked{
                 let oldValue = $0
                 $0 = nil
                 return oldValue
