@@ -8,7 +8,7 @@
 import Foundation
 @preconcurrency import Combine
 
-public extension AsyncSequence {
+public extension AsyncSequence where Self:Sendable {
     
     @inlinable
     var asyncPublisher:AsyncSequencePublisher<Self> {
@@ -17,7 +17,7 @@ public extension AsyncSequence {
     
 }
 
-public struct AsyncSequencePublisher<Base:AsyncSequence>: Publisher {
+public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher {
 
     public typealias Output = Base.Element
     public typealias Failure = Error
