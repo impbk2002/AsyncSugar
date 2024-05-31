@@ -28,9 +28,10 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         private let reference:AnyCancellable
         
         public mutating func next() async throws -> P.Output? {
-            try await withTaskCancellationHandler(operation: inner.next) { [reference] in
+            let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
             }
+            return try result?.get()
         }
         
         internal init(source: P) {
@@ -46,7 +47,7 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
 
 }
 
-private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellable {
+private struct AsyncThrowingSubscriber<P:Publisher>: Subscriber, Cancellable {
     
     typealias Input = P.Output
     typealias Failure = P.Failure
@@ -55,19 +56,17 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
 
     private struct SubscribedState {
         var state = State.awaitingSubscription
-        var pending:[UnsafeContinuation<Input?,Error>] = []
+        var pending:[UnsafeContinuation<Result<Input,Failure>?,Never>] = []
         var pendingDemand = Subscribers.Demand.none
     }
     
     private enum State {
         case awaitingSubscription
-        case subscribed(Subscription)
-        case terminal(Error?)
+        case subscribed(any Subscription)
+        case terminal(Failure?)
     }
 
-    fileprivate init() {
-        
-    }
+    let combineIdentifier = CombineIdentifier()
     
     func receive(_ input: Input) -> Subscribers.Demand {
         let snapShot = lock.withLock {
@@ -83,7 +82,10 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
         }
         switch snapShot.state {
         case .subscribed:
-            snapShot.pending.first?.resume(returning: input)
+            snapShot.pending.first?.resume(returning: .success(input))
+        case .awaitingSubscription:
+            assertionFailure("Received an output without subscription")
+            fallthrough
         default:
             snapShot.pending.forEach{ $0.resume(returning: nil) }
         }
@@ -119,11 +121,11 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
                 case .finished:
                     continuation.resume(returning: nil)
                 case .failure(let error):
-                    continuation.resume(throwing: error)
+                    continuation.resume(returning: .failure(error))
                 }
                 remaining.forEach{ $0.resume(returning: nil) }
             }
-        case .terminal:
+        case .terminal(let failure):
             snapShot.pending.forEach{ $0.resume(returning: nil) }
         }
     }
@@ -162,8 +164,8 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
         }
     }
         
-    func next() async throws -> Input? {
-        return try await withUnsafeThrowingContinuation { continuation in
+    func next() async -> Result<Input,Failure>? {
+        return await withUnsafeContinuation { continuation in
             let snapShot = lock.withLock {
                 let oldStatus = $0.state
                 switch oldStatus {
@@ -172,8 +174,10 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
                     $0.pendingDemand += 1
                 case .subscribed(_):
                     $0.pending.append(continuation)
-                case .terminal:
+                case .terminal(.some(_)):
                     $0.state = .terminal(nil)
+                case .terminal(.none):
+                    break
                 }
                 return oldStatus
             }
@@ -184,8 +188,8 @@ private final class AsyncThrowingSubscriber<P:Publisher> : Subscriber, Cancellab
                 subscription.request(.max(1))
             case .terminal(.none):
                 continuation.resume(returning: nil)
-            case .terminal(.some(let error)):
-                continuation.resume(throwing: error)
+            case .terminal(let error?):
+                continuation.resume(returning: .failure(error))
             }
          }
     }

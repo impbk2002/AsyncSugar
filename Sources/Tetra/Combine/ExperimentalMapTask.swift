@@ -208,14 +208,15 @@ extension MultiMapTask {
             await withTaskCancellationHandler {
                 if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
                     try? await withThrowingDiscardingTaskGroup(returning: Void.self) { group in
+                        defer { terminateStream() }
                         await localTask(
                             subscription: subscription,
                             group: &group
                         )
-                        terminateStream()
                     }
                 } else {
                     try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
+                        defer { terminateStream() }
                         var iterator = group.makeAsyncIterator()
                         let stream = AsyncThrowingStream(unfolding: { try await iterator.next() })
                         async let subTask:() = {
@@ -227,7 +228,6 @@ extension MultiMapTask {
                             subscription: subscription,
                             group: &group
                         )
-                        terminateStream()
                         try await subTask
                     }
                 }

@@ -46,7 +46,7 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         
 }
 
-private final class AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where P.Failure == Never {
+private struct AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where P.Failure == Never {
     
     typealias Input = P.Output
     typealias Failure = Never
@@ -59,9 +59,7 @@ private final class AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where
         var pendingDemand = Subscribers.Demand.none
     }
     
-    fileprivate init() {
-        
-    }
+    let combineIdentifier = CombineIdentifier()
     
     func receive(_ input: Input) -> Subscribers.Demand {
         let snapShot = lock.withLockUnchecked {
