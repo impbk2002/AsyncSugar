@@ -28,8 +28,8 @@ enum TaskValueContinuation: Sendable {
         case resume(UnsafeContinuation<Void,any Error>)
         case cancel(Task<Void,Never>)
         
-        func run() {
-            switch self {
+        consuming func run() {
+            switch consume self {
             case .raise(let unsafeContinuation):
                 unsafeContinuation.resume(throwing: CancellationError())
             case .resume(let unsafeContinuation):
@@ -40,8 +40,8 @@ enum TaskValueContinuation: Sendable {
         }
     }
     
-    mutating func transition(_ event:Event) -> Effect? {
-        switch event {
+    mutating func transition(_ event: consuming Event) -> Effect? {
+        switch consume event {
         case .suspend(let unsafeContinuation):
             return suspend(unsafeContinuation)
         case .resume(let task):

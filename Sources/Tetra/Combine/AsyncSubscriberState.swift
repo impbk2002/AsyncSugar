@@ -29,8 +29,8 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         case terminal(Failure?)
     }
     
-    mutating func transition(_ event:Event) -> Effect? {
-        switch event {
+    mutating func transition(_ event: consuming Event) -> Effect? {
+        switch consume event {
         case .receive(let subscription):
             return receive(subscription)
         case .resume(let input):
@@ -55,8 +55,8 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         case cancelSubscription(any Subscription)
         case cancel([Continuation], (any Subscription)?)
         
-        func run() {
-            switch self {
+        consuming func run() {
+            switch consume self {
             case .resumeNil(let array):
                 array.forEach{ $0.resume(returning: nil) }
             case .resumeValue(let continuation, let input):
