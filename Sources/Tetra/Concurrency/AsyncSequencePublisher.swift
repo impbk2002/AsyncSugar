@@ -25,16 +25,6 @@ public extension TetraExtension where Base: AsyncSequence & Sendable {
     
 }
 
-public extension AsyncSequence where Self:Sendable {
-    
-    @available(*, deprecated, message: "use explicit extension publisher property instead, will be removed on Swift 6")
-    @inlinable
-    var asyncPublisher:AsyncSequencePublisher<Self> {
-        TetraExtension(base: self).publisher
-    }
-    
-}
-
 public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher {
 
     public typealias Output = Base.Element
@@ -146,7 +136,7 @@ extension AsyncSequencePublisher {
                 do {
                     for await var pending in demandSource.stream {
                         while pending > .none {
-                            if let value = try await iterator.next() {
+                            if let value = try await iterator.next(isolation: nil) {
                                 pending -= 1
                                 if let newDemand = send(value) {
                                     pending += newDemand

@@ -37,7 +37,7 @@ public struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where
     public init(
         maxTasks: Subscribers.Demand = .max(1),
         upstream: Upstream,
-        transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+        transform: @Sendable @escaping (Upstream.Output) async throws(Failure) -> Output
     ) {
         precondition(maxTasks != .none, "maxTasks can not be zero")
         self.maxTasks = maxTasks
@@ -225,12 +225,12 @@ extension MultiMapTask {
                 } else {
                     try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
                         defer { terminateStream() }
-                        var iterator = group.makeAsyncIterator()
-                        let stream = AsyncThrowingStream(unfolding: { try await iterator.next() })
-                        async let subTask:() = {
-                            for try await _ in stream {
+                        async let subTask:() = { [iter = group.makeAsyncIterator()] in
+                            var iterator = iter
+                            while let _ = try await iterator.next() {
                                 
                             }
+
                         }()
                         await localTask(
                             subscription: subscription,

@@ -22,7 +22,7 @@ final class MultiMapTaskTests: XCTestCase {
         )
         let cancellable = MultiMapTask(maxTasks: .max(1), upstream: publisher) {
             await Task.yield()
-            return .success($0)
+            return $0
         }.sink { _ in
             expect.fulfill()
         } receiveValue: {
@@ -50,7 +50,7 @@ final class MultiMapTaskTests: XCTestCase {
                 }
                 XCTAssertTrue(Task.isCancelled)
             }
-            return .success(value)
+            return value
         }.handleEvents(
             receiveCancel: { expect.fulfill() }
         )
@@ -71,12 +71,12 @@ final class MultiMapTaskTests: XCTestCase {
         let target = try XCTUnwrap(sequence.randomElement())
         let upstream = sequence.publisher.setFailureType(to: CancellationError.self)
         let expect = expectation(description: "task failure")
-        let pub = MultiMapTask(maxTasks: .max(1), upstream: upstream, transform: { value in
+        let pub = MultiMapTask(maxTasks: .max(1), upstream: upstream) { value in
             if value == target {
-                return .failure(CancellationError()) as Result<Int,CancellationError>
+                throw CancellationError()
             }
-            return .success(value) as Result<Int,CancellationError>
-        })
+            return value
+        }
         var bag = Set<AnyCancellable>()
         pub.sink { completion in
             switch completion {

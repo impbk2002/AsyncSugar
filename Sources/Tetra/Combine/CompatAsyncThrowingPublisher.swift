@@ -12,7 +12,6 @@ import Foundation
 public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
 
     public typealias AsyncIterator = Iterator
-    public typealias Element = P.Output
     
     public var publisher:P
     
@@ -23,11 +22,11 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
     public struct Iterator: AsyncIteratorProtocol {
         
         public typealias Element = P.Output
-        
+        public typealias Failure = P.Failure
         private let inner = AsyncThrowingSubscriber<P>()
         private let reference:AnyCancellable
         
-        public mutating func next() async throws -> P.Output? {
+        public mutating func next() async throws(P.Failure) -> P.Output? {
             let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
             }

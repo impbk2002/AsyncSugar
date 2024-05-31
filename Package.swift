@@ -32,6 +32,7 @@ let package = Package(
             dependencies: [],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency=complete"),
+                .enableUpcomingFeature("FullTypedThrows"),
             ]
         ),
         .testTarget(

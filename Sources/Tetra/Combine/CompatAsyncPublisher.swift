@@ -13,6 +13,7 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
 
     public typealias AsyncIterator = Iterator
     public typealias Element = P.Output
+    public typealias Failure = P.Failure
     
     public var publisher:P
     
@@ -24,9 +25,10 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         self.publisher = publisher
     }
     
-    public struct Iterator: NonThrowingAsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol {
         
         public typealias Element = P.Output
+        public typealias Failure = P.Failure
         
         private let inner = AsyncSubscriber<P>()
         private let reference:AnyCancellable
