@@ -11,7 +11,7 @@ import os
 
 internal enum SubscriptionStatus {
     case awaitingSubscription
-    case subscribed(Subscription)
+    case subscribed(any Subscription)
     case terminal
     
     var subscription:Subscription? {

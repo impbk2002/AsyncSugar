@@ -29,11 +29,6 @@ public extension Combine.Future where Failure == Never {
                         receiveValue: {
                             continuation.resume(returning: $0)
                             return .none
-                        },
-                        receiveCompletion: { completion in
-                            if case let .failure(failure) = completion {
-                                continuation.resume(throwing: failure)
-                            }
                         }
                     ))
                 }
@@ -57,21 +52,27 @@ public extension Combine.Future {
             if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
                 return try await value
             } else {
-                return try await withCheckedThrowingContinuation{ continuation in
+                let result: Result<Output,Failure> = await withCheckedContinuation { continuation in
                     self.subscribe(AnySubscriber(
                         receiveSubscription: {
                             $0.request(.max(1))
                         },
                         receiveValue: {
-                            continuation.resume(returning: $0)
+                            continuation.resume(returning: .success($0))
                             return .none
                         },
                         receiveCompletion: {
                             if case let .failure(error) = $0 {
-                                continuation.resume(throwing: error)
+                                continuation.resume(returning: .failure(error))
                             }
                         }
                     ))
+                }
+                switch result {
+                case .success(let success):
+                    return success
+                case .failure(let failure):
+                    throw failure
                 }
             }
         }

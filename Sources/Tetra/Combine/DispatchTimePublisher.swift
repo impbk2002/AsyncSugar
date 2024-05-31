@@ -9,6 +9,29 @@ import Foundation
 import Dispatch
 import Combine
 
+extension DispatchSource: TetraExtended {}
+
+public extension TetraExtension where Base:DispatchSource {
+    
+    static func timePublisher(
+        interval: DispatchTimeInterval,
+        leeway:DispatchTimeInterval = .nanoseconds(0),
+        timerFlags: DispatchSource.TimerFlags = [],
+        qos:DispatchQoS = .unspecified,
+        workFlags: DispatchWorkItemFlags = [],
+        queue: DispatchQueue? = nil) -> Publishers.MakeConnectable<DispatchTimePublisher> {
+            DispatchTimePublisher(
+                interval: interval,
+                leeway: leeway,
+                timerFlags: timerFlags,
+                qos: qos,
+                workFlags: workFlags,
+                queue: queue
+            ).makeConnectable()
+        }
+}
+
+
 /**
     TimePublisher which emits `DisptachTime` using `DispatchSourceTimer`
  
@@ -53,26 +76,6 @@ public struct DispatchTimePublisher: Publisher {
         .attach(subscriber)
     }
     
-}
-
-public extension DispatchSource {
-    
-    static func timePublisher(
-        interval: DispatchTimeInterval,
-        leeway:DispatchTimeInterval = .nanoseconds(0),
-        timerFlags: DispatchSource.TimerFlags = [],
-        qos:DispatchQoS = .unspecified,
-        workFlags: DispatchWorkItemFlags = [],
-        queue: DispatchQueue? = nil) -> Publishers.MakeConnectable<DispatchTimePublisher> {
-            DispatchTimePublisher(
-                interval: interval,
-                leeway: leeway,
-                timerFlags: timerFlags,
-                qos: qos,
-                workFlags: workFlags,
-                queue: queue
-            ).makeConnectable()
-        }
 }
 
 extension DispatchTimePublisher {
