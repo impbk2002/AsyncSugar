@@ -16,7 +16,8 @@ import Foundation
     
     precondition `maxTasks` must be none zero value
  */
-internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+@_spi(Experimental)
+public struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
     
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
@@ -27,9 +28,7 @@ internal struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher whe
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
-        let task = Task {
-            await processor.run()
-        }
+        let task = Task(operation: processor.run)
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
@@ -187,7 +186,8 @@ extension MultiMapTask {
             }?.run()
         }
         
-        func run() async {
+        @Sendable
+        nonisolated func run() async {
             let token:Void? = try? await waitForCondition()
             if token == nil {
                 withUnsafeCurrentTask{

@@ -20,6 +20,12 @@ public extension Publisher {
         TryMapTask(upstream: self, transform: transform)
     }
     
+    @_spi(Experimental)
+    @inlinable
+    func multiMapTask<T:Sendable>(maxTasks: Subscribers.Demand = .max(1), transform: @escaping @Sendable (Output) async -> Result<T,Failure>) -> MultiMapTask<Self,T> where Output: Sendable {
+        MultiMapTask(maxTasks: maxTasks, upstream: self, transform: transform)
+    }
+    
     @available(iOS, deprecated: 15.0, renamed: "values")
     @available(macCatalyst, deprecated: 15.0, renamed: "values")
     @available(tvOS, deprecated: 15.0, renamed: "values")
