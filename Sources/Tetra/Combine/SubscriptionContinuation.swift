@@ -27,8 +27,8 @@ internal enum SubscriptionContinuation {
         case resume(UnsafeContinuation<Subscription?,Never>, any Subscription)
         case cancel(UnsafeContinuation<Subscription?,Never>)
         
-        func run() {
-            switch self {
+        consuming func run() {
+            switch consume self {
             case .drop(let subscription):
                 subscription.cancel()
             case .resume(let unsafeContinuation, let subscription):
@@ -39,8 +39,8 @@ internal enum SubscriptionContinuation {
         }
     }
     
-    mutating func transition(_ event:Event) -> Effect? {
-        switch event {
+    mutating func transition(_ event:consuming Event) -> Effect? {
+        switch consume event {
         case .resume(let subscription):
             return resume(subscription)
         case .suspend(let unsafeContinuation):
