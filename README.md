@@ -61,9 +61,9 @@ import Tetra
     <summary>MultiMapTask</summary>
     !Experimantal
     
-    Transform upstream value using async closure in Concurrent manner.
-    Transformer runs up to `maxTasks` in concurrent manner managed by TaskGroup.
-    `maxTasks = 1` has same behavior with (Try)MapTask.
+Transform upstream value using async closure in Concurrent manner.
+Transformer runs up to `maxTasks` in concurrent manner managed by TaskGroup.
+`maxTasks = 1` has same behavior with (Try)MapTask.
     
 ```swift
 import Combine
