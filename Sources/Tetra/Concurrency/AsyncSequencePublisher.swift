@@ -8,16 +8,34 @@
 import Foundation
 @preconcurrency import Combine
 
-public extension AsyncSequence {
+public extension AsyncSequence where Self:Sendable {
     
-    @inlinable
-    var asyncPublisher:AsyncSequencePublisher<Self> {
-        .init(base: self)
+    var tetra:TetraExtension<Self> {
+        .init(self)
     }
     
 }
 
-public struct AsyncSequencePublisher<Base:AsyncSequence>: Publisher {
+public extension TetraExtension where Base: AsyncSequence & Sendable {
+    
+    @inlinable
+    var publisher:AsyncSequencePublisher<Base> {
+        .init(base: base)
+    }
+    
+}
+
+public extension AsyncSequence where Self:Sendable {
+    
+    @available(*, deprecated, message: "use explicit extension publisher property instead, will be removed on Swift 6")
+    @inlinable
+    var asyncPublisher:AsyncSequencePublisher<Self> {
+        TetraExtension(base: self).publisher
+    }
+    
+}
+
+public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher {
 
     public typealias Output = Base.Element
     public typealias Failure = Error

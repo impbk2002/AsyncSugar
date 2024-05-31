@@ -45,9 +45,7 @@ public struct TryMapTask<Upstream:Publisher, Output:Sendable>: Publisher where U
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Output == S.Input {
         let processor = Inner(subscriber: subscriber, transform: transform)
-        let task = Task{
-           await processor.run()
-        }
+        let task = Task(operation: processor.run)
         processor.resumeCondition(task)
         upstream.subscribe(processor)
         
@@ -139,7 +137,8 @@ extension TryMapTask {
             }?.run()
         }
         
-        func run() async {
+        @Sendable
+        nonisolated func run() async {
             let token:Void? = try? await waitForCondition()
             if token == nil {
                 withUnsafeCurrentTask{

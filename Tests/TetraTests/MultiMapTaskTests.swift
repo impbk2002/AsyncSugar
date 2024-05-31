@@ -6,7 +6,7 @@
 //
 
 import XCTest
-@testable import Tetra
+@testable @_spi(Experimental) import Tetra
 import Combine
 
 
