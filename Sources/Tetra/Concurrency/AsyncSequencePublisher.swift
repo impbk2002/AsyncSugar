@@ -10,9 +10,27 @@ import Foundation
 
 public extension AsyncSequence where Self:Sendable {
     
+    var tetra:TetraExtension<Self> {
+        .init(self)
+    }
+    
+}
+
+public extension TetraExtension where Base: AsyncSequence & Sendable {
+    
+    @inlinable
+    var publisher:AsyncSequencePublisher<Base> {
+        .init(base: base)
+    }
+    
+}
+
+public extension AsyncSequence where Self:Sendable {
+    
+    @available(*, deprecated, message: "use explicit extension publisher property instead, will be removed on Swift 6")
     @inlinable
     var asyncPublisher:AsyncSequencePublisher<Self> {
-        .init(base: self)
+        TetraExtension(base: self).publisher
     }
     
 }

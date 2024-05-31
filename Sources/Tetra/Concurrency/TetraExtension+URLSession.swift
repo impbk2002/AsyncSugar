@@ -7,16 +7,10 @@
 
 import Foundation
 
-public extension URLSession {
-    @inlinable
-    var tetraExtra:TetraExtension<URLSession> {
-        .init(base: self)
-    }
-    
-}
+extension URLSession: TetraExtended {}
 
 @available(iOS 13.0, tvOS 13.0, macCatalyst 13.0, macOS 10.15, watchOS 6.0, *)
-public extension TetraExtension where Base == URLSession {
+public extension TetraExtension where Base: URLSession {
     
     @inlinable
     func upload(request:URLRequest, file:URL) async throws -> (Data,URLResponse) {

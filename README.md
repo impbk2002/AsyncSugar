@@ -22,6 +22,8 @@ Combine <-> AsyncSequence interchanging
 
 [TryMapTask](./Sources/Tetra/Combine/Publishers+TryMapTask.swift)
 
+[MultiMapTask](./Sources/Tetra/Combine/ExperimentalMapTask.swift)
+
 </details>
 
 [SwiftUI.AsyncImage](./Sources/Tetra/SwiftUI/AsyncImage+BackPort.swift)
@@ -31,10 +33,12 @@ Combine <-> AsyncSequence interchanging
 ## Usage
 <details open>
 
-  <summary>Publishers.(Try)MapTask</summary>
+  <summary>(Try)MapTask</summary>
   
   
-  Transform upstream value using async (throwing) closure
+  Transform upstream value using async (throwing) closure in Serial manner.
+  Only one transformer runs at a time.
+  Wil be migrated to `MultiMapTask`.
   
 ```swift
 import Combine
@@ -53,6 +57,36 @@ import Tetra
 ```
 </details>
 
+<details open>
+    <summary>MultiMapTask</summary>
+    !Experimantal
+    
+    Transform upstream value using async closure in Concurrent manner.
+    Transformer runs up to `maxTasks` in concurrent manner managed by TaskGroup.
+    `maxTasks = 1` has same behavior with (Try)MapTask.
+    
+    ```swift
+import Combine
+@_spi(Experimental) import Tetra
+        
+        let cancellable = (0..<20).publisher
+            .setFailureType(to: URLError.self)
+            .multiMapTask(maxTasks: .unlimited) { _ in
+                // Underlying Task is cancelled if subscription is cancelled before task completes.
+                do {
+                    let (data, response) = try await URLSession.shared.data(from: URL(string: "https://google.com")!)
+                    return .success(data) as Result<Data,URLError>
+                } catch {
+                    return .failure(error as! URLError) as Result<Data,URLError>
+                }
+            }.sink { completion in
+                
+            } receiveValue: { data in
+                
+            }
+
+```
+</details>
 
 <details open>
   <summary>AsyncSequencePublisher</summary>
@@ -67,7 +101,7 @@ import Tetra
             continuation.yield(1)
             continuation.finish()
             // Underlying AsyncIterator and Task receive task cancellation if subscription is cancelled.
-        }.asyncPublisher
+        }.tetra.publisher
             .catch{ _ in Empty().setFailureType(to: Never.self) }
             .sink { number in
                 
@@ -87,7 +121,7 @@ import Tetra
 import UIKit
         
         // use NotificationCenter.Notifications if available otherwise use NotficationSequence under the hood
-        for await notification in NotificationCenter.default.sequence(named: UIApplication.didFinishLaunchingNotification) {
+        for await notification in NotificationCenter.default.tetra.notifications(named: UIApplication.didFinishLaunchingNotification) {
             
         }
 ```
@@ -102,8 +136,9 @@ import UIKit
 import Combine
 import Tetra
         
+        let publisher = URLSession.shared.dataTaskPublisher(for: URL(string: "https://google.com")!)
         // use AsyncThrowingPublisher if available otherwise use CompatAsyncThrowingPublisher under the hood.
-        for try await (data, response) in URLSession.shared.dataTaskPublisher(for: URL(string: "https://google.com")!).sequence {
+        for try await (data, response) in publisher.tetra.values {
             
         }
 ```
@@ -135,8 +170,21 @@ struct ContentView: View {
 
 ## Known Issues
 
-`MapTask` and `TryMapTask` could lose the value when using with `PublishSubject` or `CurrentValueSubject`
+`MapTask` and `TryMapTask`, `MultiMapTask` could lose the value when using with `PublishSubject` or `CurrentValueSubject`.
 
-- This is because, Swift does not allow running task inline(run task until reaching suspending point)
+- This is because, Swift does not allow running task inline(run task until reaching suspending point). So `MapTask` operators need additional time to for warmup.
 
-- To fix this issue, use `MapTask` or `TryMapTask` inside the `FlatMap` or attach `buffer` before `MapTask` and `TryMapTask`
+- To fix this issue, use `MapTask` family inside the `FlatMap` or attach `buffer` before them.
+
+
+## TODO
+
+- Add more Tests
+
+- Swift 6 Concurrency model
+
+- FullTypedThrow for powerful generic failure
+
+- more fine grained way to introduce extension methods (maybe something like `.af` in Alamofire?)
+
+- remove all `AsyncTypedSequence` and `WrappedAsyncSequence` dummy protocol when `FullTypedThrow` is implemented.

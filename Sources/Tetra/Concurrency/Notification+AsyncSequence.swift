@@ -9,22 +9,32 @@
 import Foundation
 import _Concurrency
 
+extension NotificationCenter: TetraExtended {}
+
+extension TetraExtension where Base: NotificationCenter {
+    
+    func notifications(named: Notification.Name, object: AnyObject? = nil) -> WrappedAsyncSequence<Notification> {
+        if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
+            return WrappedAsyncSequence(base: base.notifications(named: named, object: object))
+        } else {
+            return WrappedAsyncSequence(base: NotificationSequence(center: base, named: named, object: object))
+        }
+    }
+    
+}
+
 
 @available(iOS 13.0, tvOS 13.0, macCatalyst 13.0, watchOS 6.0, macOS 10.15, *)
 public extension NotificationCenter {
     
     
-    @available(iOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications")
-    @available(tvOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications")
-    @available(macCatalyst, introduced: 13.0, deprecated: 15.0, renamed: "notifications")
-    @available(watchOS, introduced: 6.0, deprecated: 8.0, renamed: "notifications")
-    @available(macOS, introduced: 10.15, deprecated: 12.0, renamed: "notifications")
+    @available(iOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
+    @available(tvOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
+    @available(macCatalyst, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
+    @available(watchOS, introduced: 6.0, deprecated: 8.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
+    @available(macOS, introduced: 10.15, deprecated: 12.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
     func sequence(named:Notification.Name, object:AnyObject? = nil) -> WrappedAsyncSequence<Notification> {
-        if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            return WrappedAsyncSequence(base: self.notifications(named: named, object: object))
-        } else {
-            return WrappedAsyncSequence(base: NotificationSequence(center: self, named: named, object: object))
-        }
+        tetra.notifications(named: named, object: object)
     }
     
 }
