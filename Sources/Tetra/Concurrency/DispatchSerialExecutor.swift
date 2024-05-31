@@ -99,6 +99,10 @@ public final class DispatchQueueExecutor: SerialExecutor {
         return result
     }
     
+    public func checkIsolated() {
+        dispatchPrecondition(condition: .onQueue(queue))
+    }
+    
 }
 
 

@@ -71,7 +71,7 @@ public final class RunLoopExecutor: SerialExecutor {
         return runner.thread == other.runner.thread
     }
     
-    public func checkIsolation() {
+    public func checkIsolated() {
         precondition(runner.thread == Thread.current, "Expected \(runner.thread) but found \(Thread.current)")
     }
     
@@ -133,6 +133,9 @@ public final class LegacyRunLoopExecutor: SerialExecutor {
     }
     #endif
     
+    public func checkIsolated() {
+        precondition(runner.thread == Thread.current, "Expected \(runner.thread) but found \(Thread.current)")
+    }
 }
 
 
