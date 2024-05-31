@@ -65,7 +65,7 @@ import Tetra
     Transformer runs up to `maxTasks` in concurrent manner managed by TaskGroup.
     `maxTasks = 1` has same behavior with (Try)MapTask.
     
-    ```swift
+```swift
 import Combine
 @_spi(Experimental) import Tetra
         
