@@ -76,10 +76,10 @@ extension MapTask {
     
     struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible, Sendable where S.Failure == Failure, S.Input == Output {
         
-        let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
-        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
-        let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+        private let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
+        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
+        private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
         let combineIdentifier = CombineIdentifier()
         
         init(
@@ -90,7 +90,7 @@ extension MapTask {
             state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
-        func send(completion: Subscribers.Completion<Failure>?) {
+        private func send(completion: Subscribers.Completion<Failure>?) {
             let subscriber = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
@@ -101,18 +101,18 @@ extension MapTask {
             }
         }
         
-        func send(_ value:Output) -> Subscribers.Demand? {
+        private func send(_ value:Output) -> Subscribers.Demand? {
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(value)
         }
 
-        func terminateStream() {
+        private func terminateStream() {
             demandSource.continuation.finish()
             valueSource.continuation.finish()
         }
         
-        func waitForUpStream() async -> (any Subscription)? {
+        private func waitForUpStream() async -> (any Subscription)? {
             await withTaskCancellationHandler {
                 await withUnsafeContinuation { coninuation in
                     state.withLock{
@@ -132,7 +132,7 @@ extension MapTask {
             }?.run()
         }
         
-        func waitForCondition() async throws {
+        private func waitForCondition() async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -140,7 +140,7 @@ extension MapTask {
             }
         }
         
-        func clearCondition() {
+        private func clearCondition() {
             state.withLock{
                 $0.condition.transition(.finish)
             }?.run()
@@ -270,9 +270,3 @@ extension MapTask.Inner: CustomStringConvertible, CustomPlaygroundDisplayConvert
     
 }
 
-extension Publishers {
-    
-    @available(*, deprecated, renamed: "Tetra.TryMapTask", message: "use MapTask directely")
-    typealias MapTask = Tetra.MapTask
-    
-}

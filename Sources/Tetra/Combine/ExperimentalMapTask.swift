@@ -52,7 +52,7 @@ extension MultiMapTask: Sendable where Upstream: Sendable {}
 extension MultiMapTask {
 
     struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
-        var demand = PendingDemandState(taskCount: 0, pendingDemand: .none)
+        var demand = PendingDemandState()
         var subscriber:S? = nil
         var upstreamSubscription = SubscriptionContinuation.waiting
         var condition = TaskValueContinuation.waiting
@@ -80,7 +80,7 @@ extension MultiMapTask {
             }
         }
         
-        func localTask(
+        private func localTask(
             subscription: any Subscription,
             group: inout some CompatThrowingDiscardingTaskGroup
         ) async {
@@ -121,12 +121,12 @@ extension MultiMapTask {
             }
         }
         
-        func terminateStream() {
+        private func terminateStream() {
             demandSource.continuation.finish()
             valueSource.continuation.finish()
         }
         
-        func send(completion: Subscribers.Completion<Failure>?) {
+        private func send(completion: Subscribers.Completion<Failure>?) {
             let subscriber = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
@@ -137,7 +137,7 @@ extension MultiMapTask {
             }
         }
         
-        func send(_ value: S.Input) -> Subscribers.Demand? {
+        private func send(_ value: S.Input) -> Subscribers.Demand? {
             let newDemand = state.withLockUnchecked{
                 $0.subscriber
             }?.receive(value)
@@ -151,7 +151,7 @@ extension MultiMapTask {
             }
         }
         
-        func receive(demand:Subscribers.Demand) -> Subscribers.Demand {
+        private func receive(demand:Subscribers.Demand) -> Subscribers.Demand {
             if maxTasks == .unlimited {
                 return demand
             }
@@ -160,7 +160,7 @@ extension MultiMapTask {
             }
         }
 
-        func waitForUpStream() async -> (any Subscription)? {
+        private func waitForUpStream() async -> (any Subscription)? {
             await withTaskCancellationHandler {
                 await withUnsafeContinuation { coninuation in
                     state.withLockUnchecked{
@@ -180,7 +180,7 @@ extension MultiMapTask {
             }?.run()
         }
         
-        func waitForCondition() async throws {
+        private func waitForCondition() async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -188,7 +188,7 @@ extension MultiMapTask {
             }
         }
         
-        func clearCondition() {
+        private func clearCondition() {
             state.withLock{
                 $0.condition.transition(.finish)
             }?.run()

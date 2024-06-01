@@ -64,8 +64,8 @@ extension AsyncSequencePublisher {
         
         var playgroundDescription: Any { description }
         let combineIdentifier = CombineIdentifier()
-        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state:some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
+        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        private let state:some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         
         init(subscriber:S) {
             state.withLockUnchecked{
@@ -84,11 +84,11 @@ extension AsyncSequencePublisher {
             demandSource.continuation.yield(demand)
         }
         
-        func send(_ value:S.Input) -> Subscribers.Demand? {
+        private func send(_ value:S.Input) -> Subscribers.Demand? {
             state.withLockUnchecked{ $0.subscriber }?.receive(value)
         }
         
-        func send(completion: Subscribers.Completion<S.Failure>?) {
+        private func send(completion: Subscribers.Completion<S.Failure>?) {
             let subscriber = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
@@ -105,7 +105,7 @@ extension AsyncSequencePublisher {
             }?.run()
         }
         
-        func waitForCondition() async throws {
+        private func waitForCondition() async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -113,7 +113,7 @@ extension AsyncSequencePublisher {
             }
         }
         
-        func clearCondition() {
+        private func clearCondition() {
             state.withLock{
                 $0.condition.transition(.finish)
             }?.run()
