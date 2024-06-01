@@ -60,11 +60,11 @@ extension MultiMapTask {
     
     struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
-        let maxTasks:Subscribers.Demand
-        let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
-        let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
-        let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
-        let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
+        private let maxTasks:Subscribers.Demand
+        private let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
+        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
+        private let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
 
         let combineIdentifier = CombineIdentifier()
         
