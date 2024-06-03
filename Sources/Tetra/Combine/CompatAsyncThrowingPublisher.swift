@@ -16,6 +16,7 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
     
     public var publisher:P
     
+    @inlinable
     public func makeAsyncIterator() -> AsyncIterator {
         Iterator(source: publisher)
     }
@@ -23,10 +24,12 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
     public struct Iterator: AsyncIteratorProtocol {
         
         public typealias Element = P.Output
+        @usableFromInline
+        internal let inner = AsyncSubscriber<P>()
+        @usableFromInline
+        internal let reference:AnyCancellable
         
-        private let inner = AsyncThrowingSubscriber<P>()
-        private let reference:AnyCancellable
-        
+        @inlinable
         public mutating func next() async throws -> P.Output? {
             let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
@@ -41,6 +44,7 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
             }
         }
         
+        @usableFromInline
         internal init(source: P) {
             self.reference = AnyCancellable(inner)
             source.subscribe(inner)
@@ -48,55 +52,9 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         
     }
     
+    @inlinable
     public init(publisher: P) {
         self.publisher = publisher
     }
 
-}
-
-private struct AsyncThrowingSubscriber<P:Publisher>: Subscriber, Cancellable {
-    
-    typealias Input = P.Output
-    typealias Failure = P.Failure
-    
-    private let lock:some UnfairStateLock<AsyncSubscriberState<P.Output,P.Failure>> = createUncheckedStateLock(uncheckedState: .init())
-
-
-    let combineIdentifier = CombineIdentifier()
-    
-    func receive(_ input: Input) -> Subscribers.Demand {
-        lock.withLockUnchecked{
-            $0.transition(.resume(input))
-        }?.run()
-        
-        return .none
-    }
-    
-    func receive(completion: Subscribers.Completion<Failure>) {
-        lock.withLockUnchecked{
-            $0.transition(.terminate(completion))
-        }?.run()
-    }
-    
-    func receive(subscription: Subscription) {
-        lock.withLockUnchecked{
-            $0.transition(.receive(subscription))
-        }?.run()
-    }
-    
-    
-    func cancel() {
-        lock.withLockUnchecked{
-            $0.transition(.terminate(nil))
-        }?.run()
-    }
-        
-    func next() async -> Result<Input,Failure>? {
-        return await withUnsafeContinuation { continuation in
-            lock.withLockUnchecked{
-                $0.transition(.suspend(continuation))
-            }?.run()
-         }
-    }
-    
 }
