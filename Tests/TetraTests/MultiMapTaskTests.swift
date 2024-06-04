@@ -1,6 +1,6 @@
 //
 //  MultiMapTaskTests.swift
-//  
+//
 //
 //  Created by 박병관 on 5/25/24.
 //
@@ -11,7 +11,7 @@ import Combine
 
 
 final class MultiMapTaskTests: XCTestCase {
-
+    
     func testSerial() throws {
         let input = (0..<100).map{ $0 }
         let expect = expectation(description: "completion")
@@ -61,8 +61,8 @@ final class MultiMapTaskTests: XCTestCase {
                 XCTAssertLessThanOrEqual($0, target)
             }.store(in: &holder.bag)
         }
-
-
+        
+        
         wait(for: [expect], timeout: 0.5)
     }
     
@@ -93,5 +93,62 @@ final class MultiMapTaskTests: XCTestCase {
     }
     
     
-
+    func testMultiDeamnd() throws {
+        let warmup = expectation(description: "warmup")
+        let subject = PassthroughSubject<Int,Never>()
+        var _subscription: (any Subscription)? = nil
+        var valueHandle: (Int) -> Void = { _ in }
+        let subscriber = AnySubscriber<Int,Never>(
+            receiveSubscription: {
+                XCTAssertEqual("\($0)", "MultiMapTask")
+                _subscription = $0
+                warmup.fulfill()
+            },
+            receiveValue: {
+                valueHandle($0)
+                return .none
+            },
+            receiveCompletion: nil
+        )
+        var upstreamDemandHandle:(Subscribers.Demand) -> Void = {
+            XCTAssertEqual($0, .none)
+        }
+        subject
+            .handleEvents(
+                receiveRequest: { demand in
+                    upstreamDemandHandle(demand)
+                }
+            )
+            .multiMapTask(maxTasks: .max(3)) {
+                await Task.yield()
+                return .success($0)
+            }.subscribe(subscriber)
+        wait(for: [warmup])
+        let subscription = try XCTUnwrap(_subscription)
+        defer { subject.send(completion: .finished) }
+        let expect1 = expectation(description: "wait for prefetching demand")
+        upstreamDemandHandle = {
+            XCTAssertEqual($0, .max(3))
+            expect1.fulfill()
+        }
+        subscription.request(.max(4))
+        wait(for: [expect1])
+        let expect2 = expectation(description: "wait for remaining demand")
+        let valueExpect = expectation(description: "wait for value 4 times")
+        valueExpect.expectedFulfillmentCount = 4
+        upstreamDemandHandle = {
+            XCTAssertEqual($0, .max(1))
+            expect2.fulfill()
+        }
+        valueHandle = { a in
+            valueExpect.fulfill()
+        }
+        subject.send(0)
+        subject.send(1)
+        subject.send(2)
+        wait(for: [expect2], timeout: 0.1)
+        subject.send(3)
+        wait(for: [valueExpect], timeout: 0.1)
+    }
+    
 }
