@@ -91,28 +91,17 @@ extension TetraExtension where Base: NSManagedObjectContext {
     }
     
     @usableFromInline
-    internal func _performEnqueue<T>(
-        _ body: () throws -> T
-    ) async rethrows -> T {
-        let result:Result<T,any Error>
-        do {
-            let value = try await withoutActuallyEscaping(body) { escapingClosure in
-                try await withUnsafeThrowingContinuation { continuation in
-                    base.perform{
-                        continuation.resume(with: Result { try escapingClosure() })
-                    }
+    internal func _performEnqueue<T,Failure:Error>(
+        _ body: () throws(Failure) -> T
+    ) async throws(Failure) -> T {
+        let result:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+            await withUnsafeContinuation { continuation in
+                base.perform{
+                    continuation.resume(returning: wrapToResult(escapingClosure))
                 }
             }
-            result = .success(value)
-        } catch {
-            result = .failure(error)
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try result.get()
     }
     
     /// Asynchronously performs the specified closure on the context’s queue.
@@ -172,6 +161,7 @@ extension TetraExtension where Base: NSPersistentContainer {
         }
     }
     
+    @inline(__always)
     @usableFromInline
     internal func _convertToResult<T,Failure:Error>(_ context:NSManagedObjectContext, _ body: (NSManagedObjectContext) throws(Failure) -> T) -> Result<T,Failure> {
         do {

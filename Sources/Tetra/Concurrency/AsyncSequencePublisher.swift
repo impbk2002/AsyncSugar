@@ -119,7 +119,7 @@ extension AsyncSequencePublisher {
             }?.run()
         }
         
-        func run(_ base:consuming Base) async {
+        func run(_ base: Base) async {
             let token:Void? = try? await waitForCondition()
             defer {
                 demandSource.continuation.finish()

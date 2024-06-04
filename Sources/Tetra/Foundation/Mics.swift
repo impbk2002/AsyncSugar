@@ -77,6 +77,7 @@ internal extension NSNumber {
 
 }
 
+@inline(__always)
 @usableFromInline
 internal
 func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T,Failure> {
@@ -87,6 +88,7 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
     }
 }
 
+@inline(__always)
 @usableFromInline
 internal
 func wrapToResult<Base: AsyncIteratorProtocol>(_ iterator: inout Base) async -> Result<Base.Element,Base.Failure>? {
