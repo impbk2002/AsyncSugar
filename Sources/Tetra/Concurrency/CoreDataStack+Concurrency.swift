@@ -77,19 +77,39 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     
 }
 
+@usableFromInline
+internal protocol ObjcLocking:NSLocking {
+    
+    func tryLock() -> Bool
+}
+// To suppress deprecation
+extension NSManagedObjectContext: ObjcLocking {}
+
 extension TetraExtension where Base: NSManagedObjectContext {
     
     
     @usableFromInline
     internal func _perform<T>(
+        schedule: CoreDataScheduledTaskType = .immediate,
         _ body: () throws -> T
     ) async rethrows -> T {
-        let result:Result<T,Error>
+        let result:Result<T,any Error>
         do {
             let value = try await withoutActuallyEscaping(body) { escapingClosure in
                 try await withUnsafeThrowingContinuation { continuation in
-                    base.perform {
-                        continuation.resume(with: Result{ try escapingClosure() })
+                    // Suppress deprecation
+                    let lock:any ObjcLocking = base
+                    // NSManagedObjectContext has Reentrant Locking
+                    if schedule == .immediate, lock.tryLock() {
+                        defer { lock.unlock() }
+                        // performAndWait is Reentrant
+                        base.performAndWait{
+                            continuation.resume(with: Result { try body() })
+                        }
+                    } else {
+                        base.perform {
+                            continuation.resume(with: Result{ try escapingClosure() })
+                        }
                     }
                 }
             }
@@ -113,7 +133,7 @@ extension TetraExtension where Base: NSManagedObjectContext {
                 try await base.perform(schedule: .enqueued, $0)
             }
         } else {
-            try await _perform(body)
+            try await _perform(schedule: .enqueued, body)
         }
 
     }
@@ -182,5 +202,23 @@ extension TetraExtension where Base: NSPersistentContainer {
     
 }
 
+@usableFromInline
+internal enum CoreDataScheduledTaskType: Sendable, Hashable {
+    
+    case immediate
+    
+    case enqueued
+    
+    @usableFromInline
+    @available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
+    var platformValue: NSManagedObjectContext.ScheduledTaskType {
+        switch self {
+        case .immediate:
+            return .immediate
+        case .enqueued:
+            return .enqueued
+        }
+    }
+}
 
 #endif
