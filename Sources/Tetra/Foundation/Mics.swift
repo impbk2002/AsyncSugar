@@ -76,3 +76,28 @@ internal extension NSNumber {
 
 
 }
+
+@usableFromInline
+internal
+func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T,Failure> {
+    do {
+        return .success(try block())
+    } catch {
+        return .failure(error)
+    }
+}
+
+@usableFromInline
+internal
+func wrapToResult<Base: AsyncIteratorProtocol>(_ iterator: inout Base) async -> Result<Base.Element,Base.Failure>? {
+    do {
+        let value = try await iterator.next(isolation: nil)
+        if let value {
+            return .success(value)
+        } else {
+            return nil
+        }
+    } catch {
+        return .failure(error)
+    }
+}

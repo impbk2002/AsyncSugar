@@ -23,13 +23,14 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
     public struct Iterator: AsyncIteratorProtocol {
         
         public typealias Element = P.Output
+        public typealias Failure = P.Failure
         @usableFromInline
         internal let inner = AsyncSubscriber<P>()
         @usableFromInline
         internal let reference:AnyCancellable
         
         @inlinable
-        public mutating func next() async throws -> P.Output? {
+        public mutating func next(isolation actor: isolated (any Actor)?) async throws(P.Failure) -> P.Output? {
             let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
             }
@@ -41,6 +42,10 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
             case .none:
                 return nil
             }
+        }
+        
+        public mutating func next() async throws(Failure) -> P.Output? {
+            try await next(isolation: nil)
         }
         
         @usableFromInline

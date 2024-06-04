@@ -6,10 +6,10 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 @usableFromInline
-internal struct AsyncSubscriber<P:Publisher>: Subscriber, Cancellable {
+internal struct AsyncSubscriber<P:Publisher>: Sendable, Subscriber, Cancellable {
     
     
     public typealias Input = P.Output

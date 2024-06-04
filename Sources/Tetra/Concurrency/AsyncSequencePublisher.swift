@@ -133,26 +133,27 @@ extension AsyncSequencePublisher {
             }?.receive(subscription: self)
             var iterator = base.makeAsyncIterator()
             await withTaskCancellationHandler {
-                do {
-                    for await var pending in demandSource.stream {
-                        while pending > .none {
-                            if let value = try await iterator.next(isolation: nil) {
-                                pending -= 1
-                                if let newDemand = send(value) {
-                                    pending += newDemand
-                                } else {
-                                    return
-                                }
+                for await var pending in demandSource.stream {
+                    while pending > .none {
+                        pending -= 1
+                        guard let result = await wrapToResult(&iterator) else {
+                            send(completion: .finished)
+                            return
+                        }
+                        switch result {
+                        case .failure(let error):
+                            send(completion: .failure(error))
+                            return
+                        case .success(let value):
+                            if let newDemand = send(value) {
+                                pending += newDemand
                             } else {
-                                send(completion: .finished)
                                 return
                             }
                         }
                     }
-                    send(completion: .finished)
-                } catch {
-                    send(completion: .failure(error))
                 }
+                send(completion: .finished)
             } onCancel: {
                 demandSource.continuation.finish()
                 send(completion: nil)

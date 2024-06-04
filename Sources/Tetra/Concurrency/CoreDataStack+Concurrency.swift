@@ -18,26 +18,15 @@ extension NSManagedObjectContext: TetraExtended {}
 extension TetraExtension where Base: NSPersistentStoreCoordinator {
     
     @usableFromInline
-    internal func _perform<T>(_ body: () throws -> T) async rethrows -> T {
-        let result:Result<T,Error>
-        do {
-            let value = try await withoutActuallyEscaping(body) { escapingClosure in
-                try await withUnsafeThrowingContinuation { continuation in
-                    base.perform {
-                        continuation.resume(with: Result{ try escapingClosure() })
-                    }
+    internal func _perform<T,Failure:Error>(_ body: () throws(Failure) -> T) async throws(Failure) -> T {
+        let value:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+            return await withUnsafeContinuation { continuation in
+                base.perform {
+                    continuation.resume(returning: wrapToResult(escapingClosure))
                 }
             }
-            result = .success(value)
-        } catch {
-            result = .failure(error)
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try value.get()
     }
     
     @inlinable
@@ -50,20 +39,15 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     }
     
     @usableFromInline
-    internal func _performAndWait<T>(_ body: () throws -> T) rethrows -> T {
-        var result:Result<T,any Error>? = nil
+    internal func _performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
+        var result:Result<T,Failure>? = nil
         base.performAndWait {
-            result = Result { try body() }
+            result = wrapToResult(body)
         }
         guard let result else {
             preconditionFailure("performAndWait didn't run")
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try result.get()
     }
     
     @inlinable
@@ -94,15 +78,15 @@ extension TetraExtension where Base: NSManagedObjectContext {
     ///
     /// This method supports reentrancy — meaning it’s safe to call the method again, from within the closure, before the previous invocation completes.
     @usableFromInline
-    internal func _performImmediate<T>(
-        _ body: () throws -> T
-    ) rethrows -> Result<T,Never>? {
+    internal func _performImmediate<T,Failure:Error>(
+        _ body: () throws(Failure) -> T
+    ) throws(Failure) -> Result<T,Never>? {
         // Suppress deprecation
         let lock:any ObjcLocking = base
         // NSManagedObjectContext has Reentrant Locking
         guard lock.tryLock() else { return nil }
         defer { lock.unlock() }
-        let value = try performAndWait(body)
+        let value = try _performAndWait(body)
         return .success(value)
     }
     
@@ -155,20 +139,15 @@ extension TetraExtension where Base: NSManagedObjectContext {
     }
     
     @usableFromInline
-    internal func _performAndWait<T>(_ body: () throws -> T) rethrows -> T {
-        var result:Result<T,any Error>? = nil
+    internal func _performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
+        var result:Result<T,Failure>? = nil
         base.performAndWait {
-            result = Result { try body() }
+            result = wrapToResult(body)
         }
         guard let result else {
             preconditionFailure("performAndWait didn't run")
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try result.get()
     }
     
     @inlinable
@@ -194,26 +173,27 @@ extension TetraExtension where Base: NSPersistentContainer {
     }
     
     @usableFromInline
-    internal func _performBackground<T>(_ body: (NSManagedObjectContext) throws -> T) async rethrows -> T {
-        let result:Result<T,Error>
+    internal func _convertToResult<T,Failure:Error>(_ context:NSManagedObjectContext, _ body: (NSManagedObjectContext) throws(Failure) -> T) -> Result<T,Failure> {
         do {
-            let value = try await withoutActuallyEscaping(body) { escapingClosure in
-                try await withUnsafeThrowingContinuation { continuation in
-                    base.performBackgroundTask { newContext in
-                        continuation.resume(with: Result{ try escapingClosure(newContext) })
-                    }
+            let value = try body(context)
+            return .success(value)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    
+    @usableFromInline
+    internal func _performBackground<T,Failure:Error>(_ body: (NSManagedObjectContext) throws(Failure) -> T) async throws(Failure) -> T {
+        let result =  await withoutActuallyEscaping(body) { escapingClosure in
+             await withUnsafeContinuation { continuation in
+                base.performBackgroundTask { newContext in
+                    let result = _convertToResult(newContext, escapingClosure)
+                    continuation.resume(returning: result)
                 }
             }
-            result = .success(value)
-        } catch {
-            result = .failure(error)
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try result.get()
     }
     
 }
@@ -238,3 +218,4 @@ internal enum CoreDataScheduledTaskType: Sendable, Hashable {
 }
 
 #endif
+
