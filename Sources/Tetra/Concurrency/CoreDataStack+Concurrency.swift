@@ -87,29 +87,35 @@ extension NSManagedObjectContext: ObjcLocking {}
 
 extension TetraExtension where Base: NSManagedObjectContext {
     
+    /// Try to submits a closure to the context’s queue for synchronous execution.
+    /// - Parameter body: The closure to perform.
+    /// - Returns: `nil` if it can not run immedately
+    /// - throws: rethrow the error if it can run immedately
+    ///
+    /// This method supports reentrancy — meaning it’s safe to call the method again, from within the closure, before the previous invocation completes.
+    @usableFromInline
+    internal func _performImmediate<T>(
+        _ body: () throws -> T
+    ) rethrows -> Result<T,Never>? {
+        // Suppress deprecation
+        let lock:any ObjcLocking = base
+        // NSManagedObjectContext has Reentrant Locking
+        guard lock.tryLock() else { return nil }
+        defer { lock.unlock() }
+        let value = try performAndWait(body)
+        return .success(value)
+    }
     
     @usableFromInline
-    internal func _perform<T>(
-        schedule: CoreDataScheduledTaskType = .immediate,
+    internal func _performEnqueue<T>(
         _ body: () throws -> T
     ) async rethrows -> T {
         let result:Result<T,any Error>
         do {
             let value = try await withoutActuallyEscaping(body) { escapingClosure in
                 try await withUnsafeThrowingContinuation { continuation in
-                    // Suppress deprecation
-                    let lock:any ObjcLocking = base
-                    // NSManagedObjectContext has Reentrant Locking
-                    if schedule == .immediate, lock.tryLock() {
-                        defer { lock.unlock() }
-                        // performAndWait is Reentrant
-                        base.performAndWait{
-                            continuation.resume(with: Result { try body() })
-                        }
-                    } else {
-                        base.perform {
-                            continuation.resume(with: Result{ try escapingClosure() })
-                        }
+                    base.perform{
+                        continuation.resume(with: Result { try escapingClosure() })
                     }
                 }
             }
@@ -127,15 +133,25 @@ extension TetraExtension where Base: NSManagedObjectContext {
     
     /// Asynchronously performs the specified closure on the context’s queue.
     @inlinable
-    public func perform<T>(_ body: () throws -> T) async rethrows -> T {
-        return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try await withoutActuallyEscaping(body) {
+    public func perform<T>(
+        _ body: () throws -> T
+    ) async rethrows -> T {
+        /*
+         Since this method and NSManagedObjectContext peform has no actor preference and isolation restriction.
+         These two are always called on global nonisolated context (Actor switching happen).
+         Which means that `immediate` execution option is totally no-op.
+         
+         
+         - `_performImmediate:` is never called when using `NSManagedObjectContext.perform(schedule: .immediate)` in iOS 15 ~ iOS 17
+         
+         */
+         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
+             try await withoutActuallyEscaping(body) {
                 try await base.perform(schedule: .enqueued, $0)
             }
         } else {
-            try await _perform(schedule: .enqueued, body)
+            try await _performEnqueue(body)
         }
-
     }
     
     @usableFromInline
