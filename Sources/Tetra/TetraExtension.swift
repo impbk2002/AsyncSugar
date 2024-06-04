@@ -9,16 +9,24 @@ import Foundation
 
 public struct TetraExtension<Base> {
     
-    public internal(set) var base:Base
+    @usableFromInline
+    internal var value:Base
+    @inlinable
+    public var base:Base {
+        get { value }
+    }
     
+    @inlinable
     public init(base: Base) {
-        self.base = base
+        self.value = base
     }
     
+    @inlinable
     public init(_ base: Base) {
-        self.base = base
+        self.value = base
     }
     
+
 }
 
 
@@ -29,21 +37,25 @@ public protocol TetraExtended {
     associatedtype Base
 
     /// Static Tetra extension point.
+    @inlinable
     static var tetra: TetraExtension<Base>.Type { get set }
     /// Instance Tetra extension point.
+    @inlinable
     var tetra: TetraExtension<Base> { get set }
 }
 
 extension TetraExtended {
     /// Static Tetra extension point.
+    @inlinable
     public static var tetra: TetraExtension<Self>.Type {
         get { TetraExtension<Self>.self }
         set {}
     }
 
     /// Instance Tetra extension point.
+    @inlinable
     public var tetra: TetraExtension<Self> {
-        get { TetraExtension(base: self) }
+        get { TetraExtension(self) }
         set {}
     }
 }

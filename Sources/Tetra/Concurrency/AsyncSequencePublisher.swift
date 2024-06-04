@@ -10,6 +10,7 @@ import Foundation
 
 public extension AsyncSequence where Self:Sendable {
     
+    @inlinable
     var tetra:TetraExtension<Self> {
         .init(self)
     }
