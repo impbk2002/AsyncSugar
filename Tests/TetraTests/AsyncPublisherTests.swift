@@ -1,6 +1,6 @@
 //
-//  AsyncSubscriberTests.swift
-//  
+//  AsyncPublisherTests.swift
+//
 //
 //  Created by 박병관 on 5/31/24.
 //
@@ -10,7 +10,7 @@ import Combine
 @testable import Tetra
 
 
-final class AsyncSubscriberTests: XCTestCase {
+final class AsyncPublisherTests: XCTestCase {
 
     func testNonThrowing() async {
         let source = Array(0..<100)

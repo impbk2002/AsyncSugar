@@ -8,13 +8,17 @@
 import Foundation
 import Combine
 
+@usableFromInline
 struct AsyncSubscriberState<Input, Failure:Error> {
+    
+    @usableFromInline
     typealias Continuation = UnsafeContinuation<Result<Input,Failure>?,Never>
 
     private var subscription = SubscriptionState.awaitingSubscription
     private var pending:[Continuation] = []
     private var pendingDemand = Subscribers.Demand.none
     
+    @usableFromInline
     enum Event {
         
         case receive(any Subscription)
@@ -23,12 +27,14 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         case terminate(Subscribers.Completion<Failure>?)
     }
     
+    @usableFromInline
     enum SubscriptionState {
         case awaitingSubscription
         case subscribed(any Subscription)
         case terminal(Failure?)
     }
     
+    @usableFromInline
     mutating func transition(_ event: consuming Event) -> Effect? {
         switch consume event {
         case .receive(let subscription):
@@ -46,25 +52,21 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         }
     }
     
+    @usableFromInline
     enum Effect {
         
-        case resumeNil([Continuation])
         case resumeValue(Continuation, Input)
         case resumeFailure([Continuation], Failure)
         case request(any Subscription, Subscribers.Demand)
-        case cancelSubscription(any Subscription)
         case cancel([Continuation], (any Subscription)?)
         
+        @usableFromInline
         consuming func run() {
             switch consume self {
-            case .resumeNil(let array):
-                array.forEach{ $0.resume(returning: nil) }
             case .resumeValue(let continuation, let input):
                 continuation.resume(returning: .success(input))
             case .request(let subscription, let demand):
                 subscription.request(demand)
-            case .cancelSubscription(let subscription):
-                subscription.cancel()
             case .cancel(let array, let subscription):
                 array.forEach{ $0.resume(returning: nil) }
                 subscription?.cancel()
@@ -81,7 +83,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
             assertionFailure("Received an output without subscription")
             let jobs = pending
             pending.removeAll()
-            return .resumeNil(jobs)
+            return .cancel(jobs, nil)
         case .subscribed:
             precondition(!pending.isEmpty,"Received an output without requesting demand")
             let continuation = pending.removeFirst()
@@ -89,7 +91,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         case .terminal:
             let jobs = pending
             pending.removeAll()
-            return .resumeNil(jobs)
+            return .cancel(jobs, nil)
         }
     }
     
@@ -102,7 +104,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
                 subscription = .terminal(nil)
                 switch completion {
                 case .finished:
-                    return .resumeNil(jobs)
+                    return .cancel(jobs, nil)
                 case .failure(let failure):
                     return .resumeFailure(jobs, failure)
                 }
@@ -116,7 +118,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
                 return nil
             }
         case .terminal:
-            return .resumeNil(jobs)
+            return .cancel(jobs, nil)
         }
     }
     
@@ -142,7 +144,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
             pending.append(continuation)
             return .request(subscription, .max(1))
         case .terminal(.none):
-            return .resumeNil([continuation])
+            return .cancel([continuation], nil)
         case .terminal(let failure?):
             subscription = .terminal(nil)
             return .resumeFailure([continuation], failure)
@@ -162,9 +164,9 @@ struct AsyncSubscriberState<Input, Failure:Error> {
             }
         case .subscribed:
             assertionFailure("Received subscription more than Once")
-            return .cancelSubscription(subscription)
+            return .cancel([], subscription)
         case .terminal:
-            return .cancelSubscription(subscription)
+            return .cancel([], subscription)
         }
     }
 }

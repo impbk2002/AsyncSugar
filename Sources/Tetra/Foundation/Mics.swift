@@ -24,7 +24,9 @@ internal enum SubscriptionStatus {
 }
 
 
+
 @rethrows
+@usableFromInline
 internal protocol _ErrorMechanism {
     associatedtype Output
     func get() throws -> Output
@@ -33,12 +35,13 @@ internal protocol _ErrorMechanism {
 extension _ErrorMechanism {
     // rethrow an error only in the cases where it is known to be reachable
     
-    
+    @usableFromInline
     internal func _rethrowOrFail() rethrows -> Never {
         _ = try _rethrowGet()
         fatalError("materialized error without being in a throwing context")
     }
 
+    @usableFromInline
     internal func _rethrowGet() rethrows -> Output {
         return try get()
     }

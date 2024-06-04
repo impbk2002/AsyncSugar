@@ -17,10 +17,12 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
     
     public var publisher:P
     
+    @inlinable
     public func makeAsyncIterator() -> AsyncIterator {
         Iterator(source: publisher)
     }
     
+    @inlinable
     public init(publisher: P) {
         self.publisher = publisher
     }
@@ -30,15 +32,25 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         public typealias Element = P.Output
         public typealias Failure = P.Failure
         
-        private let inner = AsyncSubscriber<P>()
-        private let reference:AnyCancellable
+        @usableFromInline
+        internal let inner = AsyncSubscriber<P>()
+        @usableFromInline
+        internal let reference:AnyCancellable
         
+        @inlinable
         public mutating func next() async -> P.Output? {
-            await withTaskCancellationHandler(operation: inner.next) { [reference] in
+            let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
+            }
+            switch result {
+            case .none:
+                return nil
+            case .success(let value):
+                return value
             }
         }
         
+        @usableFromInline
         internal init(source: P) {
             self.reference = AnyCancellable(inner)
             source.subscribe(inner)
@@ -48,54 +60,4 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         
 }
 
-private struct AsyncSubscriber<P:Publisher> : Subscriber, Cancellable where P.Failure == Never {
-    
-    typealias Input = P.Output
-    typealias Failure = Never
-    
-    private let lock:some UnfairStateLock<AsyncSubscriberState<P.Output,Never>> = createUncheckedStateLock(uncheckedState: AsyncSubscriberState())
-    
-    let combineIdentifier = CombineIdentifier()
-    
-    func receive(_ input: Input) -> Subscribers.Demand {
-        lock.withLockUnchecked{
-            $0.transition(.resume(input))
-        }?.run()
-        return .none
-    }
-    
-    func receive(completion: Subscribers.Completion<Never>) {
-        lock.withLockUnchecked{
-            $0.transition(.terminate(completion))
-        }?.run()
-    }
-    
-    func receive(subscription: Subscription) {
-        lock.withLockUnchecked{
-            $0.transition(.receive(subscription))
-        }?.run()
-    }
-    
-    
-    func cancel() {
-        lock.withLockUnchecked{
-            $0.transition(.terminate(nil))
-        }?.run()
-    }
 
-    
-    func next() async -> Input? {
-        let result = await withUnsafeContinuation { continuation in
-            lock.withLockUnchecked{
-                $0.transition(.suspend(continuation))
-            }?.run()
-         }
-        switch result {
-        case .none:
-            return nil
-        case .success(let value):
-            return value
-        }
-    }
-    
-}
