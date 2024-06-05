@@ -151,4 +151,38 @@ final class MultiMapTaskTests: XCTestCase {
         wait(for: [valueExpect], timeout: 0.1)
     }
     
+    
+    func testInverseCompletion() throws {
+        let warmup = expectation(description: "warmup")
+        let completion = expectation(description: "completion")
+        let subject = PassthroughSubject<Int,Never>()
+        let count = 23
+        let expectValue = expectation(description: "expect to fufill \(count) times")
+        expectValue.expectedFulfillmentCount = count
+        let cancellable = subject
+            .handleEvents(
+                receiveCompletion: { _ in
+                    completion.fulfill()
+                }
+            )
+            .multiMapTask(maxTasks: .unlimited) {
+                try? await Task.sleep(nanoseconds: 1_000)
+                return .success($0)
+            }
+            .handleEvents(
+                receiveSubscription: { _ in
+                    warmup.fulfill()
+                }
+            )
+            .sink { _ in
+                expectValue.fulfill()
+            }
+        wait(for: [warmup], timeout: 0.1)
+        (0..<count).forEach(subject.send)
+        subject.send(completion: .finished)
+        wait(for: [completion, expectValue], timeout: 0.1, enforceOrder: true)
+        cancellable.cancel()
+    }
+    
+    
 }
