@@ -9,7 +9,7 @@ import Foundation
 import Combine
 
 public extension Publisher {
-    
+    @inlinable
     var tetra:TetraExtension<Self> {
         .init(self)
     }
@@ -18,8 +18,8 @@ public extension Publisher {
 
 public extension TetraExtension where Base: Publisher {
     
+    @inlinable
     var values: some AsyncTypedSequence<Base.Output,Base.Failure> {
-        if #available(iOS 15.0, macOS 12.0, macCatalyst 15.0, tvOS 15.0, watchOS 8.0, *) {
             return base.values
         } else {
             return CompatAsyncThrowingPublisher(publisher: base)

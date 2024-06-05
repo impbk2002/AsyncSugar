@@ -87,7 +87,9 @@ extension MultiMapTask {
             group.addTask(priority: nil) {
                 for await demand in demandSource.stream {
                     let nextDemand = receive(demand: demand)
-                    subscription.request(nextDemand)
+                    if nextDemand > .none {
+                        subscription.request(nextDemand)
+                    }
                 }
             }
             var iterator = valueSource.stream.makeAsyncIterator()
@@ -102,7 +104,9 @@ extension MultiMapTask {
                         do {
                             let value = try await transform(success)
                             if let demand = send(value) {
-                                subscription.request(demand)
+                                if demand > .none {
+                                    subscription.request(demand)
+                                }
                             } else {
                                 shouldBreak = true
                             }

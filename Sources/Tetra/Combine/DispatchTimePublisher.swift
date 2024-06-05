@@ -13,6 +13,7 @@ extension DispatchSource: TetraExtended {}
 
 public extension TetraExtension where Base:DispatchSource {
     
+    @inlinable
     static func timePublisher(
         interval: DispatchTimeInterval,
         leeway:DispatchTimeInterval = .nanoseconds(0),

@@ -33,6 +33,7 @@ let package = Package(
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency=complete"),
                 .enableUpcomingFeature("FullTypedThrows"),
+                .enableExperimentalFeature("IsolatedAny")
             ]
         ),
         .testTarget(

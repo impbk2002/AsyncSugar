@@ -160,10 +160,6 @@ extension TryMapTask {
             await withTaskCancellationHandler {
                 var iterator = stream.makeAsyncIterator()
                 for await var demand in demandSource.stream {
-                    if demand == .none {
-                        subscription.request(.none)
-                        continue
-                    }
                     while demand > .none {
                         demand -= 1
                         subscription.request(.max(1))

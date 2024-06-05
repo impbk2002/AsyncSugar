@@ -48,40 +48,28 @@ final class RunLoopSchedulerTests: XCTestCase {
             return true
         }
         
-        await withUnsafeContinuation{ continuation in
-            scheduler.schedule {
+        scheduler.schedule {
+            NotificationQueue.default
+                .enqueue(.init(name: name, object: object, userInfo: ["A":"B"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
+            NotificationQueue.default
+                .enqueue(.init(name: name, object: object, userInfo: ["A":"1"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
+            NotificationQueue.default
+                .enqueue(.init(name: name, object: object, userInfo: ["A":"2"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
+            NotificationQueue.default
+                .enqueue(.init(name: name, object: object, userInfo: ["A":"3"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
 
-                continuation.resume()
-                NotificationQueue.default
-                    .enqueue(.init(name: name, object: object, userInfo: ["A":"B"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
-                NotificationQueue.default
-                    .enqueue(.init(name: name, object: object, userInfo: ["A":"1"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
-                NotificationQueue.default
-                    .enqueue(.init(name: name, object: object, userInfo: ["A":"2"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
-                NotificationQueue.default
-                    .enqueue(.init(name: name, object: object, userInfo: ["A":"3"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
-
-            }
         }
-        await withUnsafeContinuation{
-            wait(for: [expect1], timeout: 1)
-            $0.resume()
-        }
+        await fulfillment(of: [expect1], timeout: 1)
         let expect2 = expectation(forNotification: name, object: object, notificationCenter: .default) {
             XCTAssertTrue($0.userInfo?["A"] as? String == "C")
             return true
         }
-        await withUnsafeContinuation{ continuation in
-            scheduler.schedule {
-                NotificationQueue.default
-                    .enqueue(.init(name: name, object: object, userInfo: ["A":"C"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
-                continuation.resume()
-            }
+        
+        scheduler.schedule {
+            NotificationQueue.default
+                .enqueue(.init(name: name, object: object, userInfo: ["A":"C"]), postingStyle: .whenIdle, coalesceMask: [.onName, .onSender], forModes: nil)
         }
-        await withUnsafeContinuation{
-            wait(for: [expect2], timeout: 1)
-            $0.resume()
-        }
+        await fulfillment(of: [expect2], timeout: 1)
     }
 
 }

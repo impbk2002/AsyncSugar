@@ -139,6 +139,7 @@ public final class LegacyRunLoopExecutor: SerialExecutor {
 }
 
 
+@inlinable
 public func newRunLoopExecutor(qos: QualityOfService) -> some SerialExecutor {
     if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, visionOS 1.0, *) {
         return RunLoopExecutor(qos: qos)
