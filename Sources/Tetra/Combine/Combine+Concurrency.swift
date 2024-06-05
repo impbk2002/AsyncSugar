@@ -9,7 +9,7 @@ import Foundation
 import Combine
 
 public extension Publisher {
-    
+    @inlinable
     var tetra:TetraExtension<Self> {
         .init(self)
     }
@@ -18,6 +18,7 @@ public extension Publisher {
 
 public extension TetraExtension where Base: Publisher, Base.Failure == Never {
     
+    @inlinable
     var values: WrappedAsyncSequence<Base.Output> {
         if #available(iOS 15.0, macOS 12.0, macCatalyst 15.0, tvOS 15.0, watchOS 8.0, *) {
             return WrappedAsyncSequence(base: base.values)
@@ -30,6 +31,7 @@ public extension TetraExtension where Base: Publisher, Base.Failure == Never {
 
 public extension TetraExtension where Base: Publisher {
     
+    @inlinable
     var values: some AsyncTypedSequence<Base.Output> {
         if #available(iOS 15.0, macOS 12.0, macCatalyst 15.0, tvOS 15.0, watchOS 8.0, *) {
             return base.values
@@ -68,6 +70,7 @@ public extension Publisher {
     @available(tvOS, deprecated: 15.0, renamed: "values", message: "will be removed on Swift 6")
     @available(macOS, deprecated: 12.0, renamed: "values", message: "will be removed on Swift 6")
     @available(watchOS, deprecated: 8.0, renamed: "values", message: "will be removed on Swift 6")
+    @inlinable
     var asyncSequence: some AsyncTypedSequence<Output> {
         return TetraExtension(self).values
     }
@@ -81,6 +84,7 @@ public extension Publisher where Failure == Never {
     @available(tvOS, deprecated: 15.0, renamed: "values", message: "will be removed on Swift 6")
     @available(macOS, deprecated: 12.0, renamed: "values", message: "will be removed on Swift 6")
     @available(watchOS, deprecated: 8.0, renamed: "values", message: "will be removed on Swift 6")
+    @inlinable
     var asyncSequence:WrappedAsyncSequence<Output> {
         return TetraExtension(self).values
     }

@@ -9,9 +9,14 @@ import Foundation
 import Combine
 
 struct PendingDemandState {
-    var taskCount:Int
-    var pendingDemand:Subscribers.Demand
+    private var taskCount:Int
+    private var pendingDemand:Subscribers.Demand
     
+    
+    init() {
+        self.taskCount = 0
+        self.pendingDemand = .none
+    }
     
     mutating func transistion(
         maxTasks:Subscribers.Demand,
