@@ -88,6 +88,7 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
     }
 }
 
+@available(macOS 9999, *)
 @inline(__always)
 @usableFromInline
 internal
@@ -101,5 +102,30 @@ func wrapToResult<Base: AsyncIteratorProtocol>(_ iterator: inout Base) async -> 
         }
     } catch {
         return .failure(error)
+    }
+}
+
+
+@inline(__always)
+@usableFromInline
+internal func wrapToResult<T,Failure:Error, U>(_ value:T, _ transform: (T) async throws(Failure) -> U) async -> Result<U,Failure> {
+    do {
+        let success = try await transform(value)
+        return .success(success)
+    } catch {
+        return .failure(error)
+    }
+}
+
+/// use only when there is no way to prove no data race is occur to the compiler
+@usableFromInline
+struct SuppressSendable<T>: @unchecked Sendable {
+    
+    @usableFromInline
+    var wrapped:T
+    
+    @usableFromInline
+    init(wrapped: T) {
+        self.wrapped = wrapped
     }
 }

@@ -100,22 +100,19 @@ extension MultiMapTask {
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
-                        var shouldBreak = false
-                        do {
-                            let value = try await transform(success)
-                            if let demand = send(value) {
+                        let result = await wrapToResult(success, transform)
+                        switch result {
+                        case .failure(let error):
+                            send(completion: .failure(error))
+                            throw CancellationError()
+                        case .success(let success):
+                            if let demand = send(success) {
                                 if demand > .none {
                                     subscription.request(demand)
                                 }
                             } else {
-                                shouldBreak = true
+                                throw CancellationError()
                             }
-                        } catch {
-                            send(completion: .failure(error))
-                            shouldBreak = true
-                        }
-                        if shouldBreak {
-                            throw CancellationError()
                         }
                     }
                     if !flag {
@@ -229,12 +226,19 @@ extension MultiMapTask {
                 } else {
                     try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
                         defer { terminateStream() }
-                        async let subTask:() = { [iter = group.makeAsyncIterator()] in
-                            var iterator = iter
+                        /*
+                         this is very unsafe operation, and there is no way to prove race problem to compiler for now.
+                         
+                         But at least version before `DiscardingTaskGroup` exist, this implementation is safe from race problem.
+                         
+                         Because polling add queueing taskGroup is implemented in Busy waiting atomic alogrithnm.
+                         */
+                        let unsafe = SuppressSendable(wrapped: group.makeAsyncIterator())
+                        async let subTask:() = {
+                            var iterator = unsafe.wrapped
                             while let _ = try await iterator.next() {
                                 
                             }
-
                         }()
                         await localTask(
                             subscription: subscription,
