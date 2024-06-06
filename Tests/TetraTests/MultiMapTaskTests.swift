@@ -71,12 +71,14 @@ final class MultiMapTaskTests: XCTestCase {
         let target = try XCTUnwrap(sequence.randomElement())
         let upstream = sequence.publisher.setFailureType(to: CancellationError.self)
         let expect = expectation(description: "task failure")
-        let pub = MultiMapTask(maxTasks: .max(1), upstream: upstream) { value in
-            if value == target {
-                throw CancellationError()
+        let block:@Sendable (Int) async throws(CancellationError) -> Int = {
+            if $0 == target {
+                try Result<Void,CancellationError>.failure(CancellationError()).get()
             }
-            return value
+            await Task.yield()
+            return $0
         }
+        let pub = MultiMapTask(maxTasks: .max(1), upstream: upstream, transform: block)
         var bag = Set<AnyCancellable>()
         pub.sink { completion in
             switch completion {
@@ -121,7 +123,7 @@ final class MultiMapTaskTests: XCTestCase {
             )
             .multiMapTask(maxTasks: .max(3)) {
                 await Task.yield()
-                return .success($0)
+                return $0
             }.subscribe(subscriber)
         wait(for: [warmup])
         let subscription = try XCTUnwrap(_subscription)
@@ -167,7 +169,7 @@ final class MultiMapTaskTests: XCTestCase {
             )
             .multiMapTask(maxTasks: .unlimited) {
                 try? await Task.sleep(nanoseconds: 1_000)
-                return .success($0)
+                return $0
             }
             .handleEvents(
                 receiveSubscription: { _ in

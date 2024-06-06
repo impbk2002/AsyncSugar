@@ -54,7 +54,7 @@ extension MultiMapTask {
     struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
         var demand = PendingDemandState()
         var subscriber:S? = nil
-        var upstreamSubscription = SubscriptionContinuation.waiting
+        var upstreamSubscription = AsyncSubscriptionState.waiting
         var condition = TaskValueContinuation.waiting
     }
     
@@ -62,7 +62,6 @@ extension MultiMapTask {
         
         private let maxTasks:Subscribers.Demand
         private let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
-        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
         private let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
 
@@ -81,17 +80,8 @@ extension MultiMapTask {
         }
         
         private func localTask(
-            subscription: any Subscription,
             group: inout some CompatThrowingDiscardingTaskGroup
         ) async {
-            group.addTask(priority: nil) {
-                for await demand in demandSource.stream {
-                    let nextDemand = receive(demand: demand)
-                    if nextDemand > .none {
-                        subscription.request(nextDemand)
-                    }
-                }
-            }
             var iterator = valueSource.stream.makeAsyncIterator()
             while let upstreamValue = await iterator.next() {
                 switch upstreamValue {
@@ -106,13 +96,7 @@ extension MultiMapTask {
                             send(completion: .failure(error))
                             throw CancellationError()
                         case .success(let success):
-                            if let demand = send(success) {
-                                if demand > .none {
-                                    subscription.request(demand)
-                                }
-                            } else {
-                                throw CancellationError()
-                            }
+                            try send(success)
                         }
                     }
                     if !flag {
@@ -123,47 +107,50 @@ extension MultiMapTask {
         }
         
         private func terminateStream() {
-            demandSource.continuation.finish()
             valueSource.continuation.finish()
         }
         
         private func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLockUnchecked{
+            let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
+                let effect = if completion != nil {
+                    $0.upstreamSubscription.transition(.finish)
+                } else {
+                    $0.upstreamSubscription.transition(.cancel)
+                }
                 $0.subscriber = nil
-                return old
+                return (old, effect)
             }
+            effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
         }
         
-        private func send(_ value: S.Input) -> Subscribers.Demand? {
-            let newDemand = state.withLockUnchecked{
-                $0.subscriber
-            }?.receive(value)
-            guard let newDemand else { return nil }
-            
-            if maxTasks == .unlimited {
-                return newDemand
+        private func send(_ value: S.Input) throws {
+            let (subscriber, subscription) = state.withLockUnchecked{
+                
+                return ($0.subscriber, $0.upstreamSubscription.subscription)
             }
-            return state.withLock{
-                $0.demand.transistion(maxTasks: maxTasks, newDemand, reduce: true)
+            guard let subscriber, let subscription else {
+                throw CancellationError()
             }
-        }
-        
-        private func receive(demand:Subscribers.Demand) -> Subscribers.Demand {
-            if maxTasks == .unlimited {
-                return demand
+            var demand = subscriber.receive(value)
+            guard maxTasks != .unlimited else {
+                subscription.request(demand)
+                return
             }
-            return state.withLock{
-                $0.demand.transistion(maxTasks: maxTasks, demand, reduce: false)
+            demand = state.withLockUnchecked{
+                $0.demand.transistion(maxTasks: maxTasks, demand, reduce: true)
+            }
+            if demand > .none {
+                subscription.request(demand)
             }
         }
 
-        private func waitForUpStream() async -> (any Subscription)? {
-            await withTaskCancellationHandler {
-                await withUnsafeContinuation { coninuation in
+        private func waitForUpStream() async throws {
+            try await withTaskCancellationHandler {
+                try await withUnsafeThrowingContinuation { coninuation in
                     state.withLockUnchecked{
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
@@ -206,11 +193,11 @@ extension MultiMapTask {
             defer {
                 clearCondition()
             }
-            let subscription = await waitForUpStream()
+            let success:Void? = try? await waitForUpStream()
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
-            guard let subscription else {
+            guard success != nil else {
                 terminateStream()
                 return
             }
@@ -219,7 +206,6 @@ extension MultiMapTask {
                     try? await withThrowingDiscardingTaskGroup(returning: Void.self) { group in
                         defer { terminateStream() }
                         await localTask(
-                            subscription: subscription,
                             group: &group
                         )
                     }
@@ -241,7 +227,6 @@ extension MultiMapTask {
                             }
                         }()
                         await localTask(
-                            subscription: subscription,
                             group: &group
                         )
                         try await subTask
@@ -249,7 +234,6 @@ extension MultiMapTask {
                 }
                 send(completion: .finished)
             } onCancel: {
-                subscription.cancel()
                 send(completion: nil)
             }
         }
@@ -291,7 +275,14 @@ extension MultiMapTask.Inner: Subscriber {
 extension MultiMapTask.Inner: Subscription {
     
     func request(_ demand: Subscribers.Demand) {
-        demandSource.continuation.yield(demand)
+        let (subscription, nextDemand) = state.withLock{
+            let subscription = $0.upstreamSubscription.subscription
+            let demand = $0.demand.transistion(maxTasks: maxTasks, demand, reduce: false)
+            return (subscription, demand)
+        }
+        if let subscription, nextDemand > .none {
+            subscription.request(nextDemand)
+        }
     }
     
     func cancel() {

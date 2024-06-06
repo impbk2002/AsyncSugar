@@ -70,14 +70,15 @@ extension MapTask {
     struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
         
         var subscriber:S? = nil
-        var upstreamSubscription = SubscriptionContinuation.waiting
+        var upstreamSubscription = AsyncSubscriptionState.waiting
         var condition = TaskValueContinuation.waiting
+        var isSleeping = true
+        var pending = Subscribers.Demand.none
     }
     
     struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible, Sendable where S.Failure == Failure, S.Input == Output {
         
         private let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
-        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
         let combineIdentifier = CombineIdentifier()
@@ -91,31 +92,42 @@ extension MapTask {
         }
         
         private func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLockUnchecked{
+            let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                return old
+                let effect = if completion == nil {
+                    $0.upstreamSubscription.transition(.cancel)
+                } else {
+                    $0.upstreamSubscription.transition(.finish)
+                }
+                return (old, effect)
             }
+            effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
         }
         
-        private func send(_ value:Output) -> Subscribers.Demand? {
-            state.withLockUnchecked{
-                $0.subscriber
-            }?.receive(value)
+        private func send(_ value:Output) throws {
+           let subscriber = state.withLockUnchecked{
+               $0.isSleeping = true
+               return $0.subscriber
+            }
+            guard let subscriber else {
+                throw CancellationError()
+            }
+            let demand = subscriber.receive(value)
+            request(demand)
         }
 
         private func terminateStream() {
-            demandSource.continuation.finish()
             valueSource.continuation.finish()
         }
         
-        private func waitForUpStream() async -> (any Subscription)? {
-            await withTaskCancellationHandler {
-                await withUnsafeContinuation { coninuation in
-                    state.withLock{
+        private func waitForUpStream() async throws {
+            try await withTaskCancellationHandler {
+                try await withUnsafeThrowingContinuation { coninuation in
+                    state.withLockUnchecked{
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
                 }
@@ -157,12 +169,12 @@ extension MapTask {
             defer {
                 clearCondition()
             }
-            let subscription = await waitForUpStream()
+            let success: Void? = try? await waitForUpStream()
             defer { terminateStream() }
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
-            guard let subscription else {
+            guard success != nil else {
                 return
             }
             let stream = valueSource.stream.map{ [transform] in
@@ -173,31 +185,18 @@ extension MapTask {
                     return .failure(failure)
                 }
             }
-            await withTaskCancellationHandler {
-                var iterator = stream.makeAsyncIterator()
-                for await var demand in demandSource.stream {
-                    while demand > .none {
-                        demand -= 1
-                        subscription.request(.max(1))
-                        switch (await iterator.next()) {
-                        case .success(let value):
-                            if let newDemand = send(value) {
-                                demand += newDemand
-                            } else {
-                                return
-                            }
-                        case .failure(let error):
-                            send(completion: .failure(error))
-                            return
-                        case .none:
-                            send(completion: .finished)
-                            return
-                        }
+            try? await withTaskCancellationHandler {
+                for await result in stream {
+                    switch result {
+                    case .success(let value):
+                        try send(value)
+                    case .failure(let error):
+                        send(completion: .failure(error))
+                        throw CancellationError()
                     }
-                    
                 }
+                send(completion: .finished)
             } onCancel: {
-                subscription.cancel()
                 send(completion: nil)
             }
 
@@ -252,7 +251,18 @@ extension MapTask.Inner: Subscription {
     }
     
     func request(_ demand: Subscribers.Demand) {
-        demandSource.continuation.yield(demand)
+        let subscription = state.withLockUnchecked {
+            $0.pending += demand
+            if $0.isSleeping && $0.pending > .none {
+                $0.isSleeping = false
+                $0.pending -= 1
+                return $0.upstreamSubscription.subscription
+            } else {
+                
+                return nil
+            }
+        }
+        subscription?.request(.max(1))
     }
     
     
