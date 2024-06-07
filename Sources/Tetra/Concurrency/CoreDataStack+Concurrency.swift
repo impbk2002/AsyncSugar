@@ -125,17 +125,20 @@ extension TetraExtension where Base: NSManagedObjectContext {
     
     /// Asynchronously performs the specified closure on the context’s queue.
     @inlinable
+    @_unsafeInheritExecutor
     public func perform<T>(
+        schedule:CoreDataScheduledTaskType = .immediate,
         _ body: () throws -> T
     ) async rethrows -> T {
         /*
+         
          Since this method and NSManagedObjectContext peform has no actor preference and isolation restriction.
          These two are always called on global nonisolated context (Actor switching happen).
          Which means that `immediate` execution option is totally no-op.
          
          
          - `_performImmediate:` is never called when using `NSManagedObjectContext.perform(schedule: .immediate)` in iOS 15 ~ iOS 17
-         
+         - @_unsafeInheritExecutor do fix the above problem
          */
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
             try await withoutActuallyEscaping(body) {
@@ -143,12 +146,18 @@ extension TetraExtension where Base: NSManagedObjectContext {
                 defer {
                     withExtendedLifetime(block, {})
                 }
-                return try await base.perform(schedule: .enqueued) { [unowned block] in
+                return try await base.perform(schedule: schedule.platformValue) { [unowned block] in
                     return try block()
                 }
             }
-        } else {
+        } else if schedule == .enqueued {
             try await _performEnqueue(body)
+        } else {
+            if let result = try _performImmediate(body) {
+                result.get()
+            } else {
+                try await _performEnqueue(body)
+            }
         }
     }
     
@@ -223,8 +232,8 @@ extension TetraExtension where Base: NSPersistentContainer {
     
 }
 
-@usableFromInline
-internal enum CoreDataScheduledTaskType: Sendable, Hashable {
+
+public enum CoreDataScheduledTaskType: Sendable, Hashable {
     
     case immediate
     
