@@ -1,6 +1,6 @@
 //
 //  URLSessionDownloadTask+Concurrency.swift
-//  
+//
 //
 //  Created by pbk on 2022/12/08.
 //
@@ -45,8 +45,8 @@ internal func download_transformer(
 /// - transform: success completion handler가 리턴직전에 호출되는 callback (at most 1)
 /// - creator: completion handler를 인자로 받아서 URLSessionTask를 생성하는 함수(exactly 1)
 @usableFromInline
-internal func urltask_transformer<T:URLSessionTask, Value, R>(
-    transform: @Sendable (Value) -> Result<R,Error>,
+internal func urltask_transformer<T:URLSessionTask, Value, R:Sendable>(
+    transform: @escaping @Sendable (Value) -> Result<R,Error>,
     creator:(
         @escaping @Sendable (Value?, URLResponse?, Error?) -> Void
     ) -> T
@@ -54,46 +54,46 @@ internal func urltask_transformer<T:URLSessionTask, Value, R>(
     let stateLock = createCheckedStateLock(checkedState: URLSessionTaskAsyncState<T>.waiting)
     
     return try await withTaskCancellationHandler {
-        try await withoutActuallyEscaping(transform) { escapingTransform in
-            try await withUnsafeThrowingContinuation { continuation in
-                let sessionTask = creator() { data, response, error in
-                    do {
-                        guard let data, let response else {
-                            throw error ?? URLError(.unknown, userInfo: [
-                                NSLocalizedDescriptionKey: NSLocalizedString("Err-998", bundle: .init(for: URLSession.self), comment: "unknown error")
-                            ])
-                        }
-                        let value = try escapingTransform(data).get()
-                        continuation.resume(returning: (value, response))
-                    } catch {
-                        continuation.resume(throwing: error)
+        
+        try await withUnsafeThrowingContinuation { continuation in
+            let sessionTask = creator() { data, response, error in
+                do {
+                    guard let data, let response else {
+                        throw error ?? URLError(.unknown, userInfo: [
+                            NSLocalizedDescriptionKey: NSLocalizedString("Err-998", bundle: .init(for: URLSession.self), comment: "unknown error")
+                        ])
                     }
-                }
-                sessionTask.resume()
-
-                let snapShot = stateLock.withLock{
-                    let oldValue = $0
-                    switch oldValue {
-                    case .cancelled:
-                        break
-                    case .task:
-                        assertionFailure("unexpected state")
-                        fallthrough
-                    case .waiting:
-                        $0 = .task(sessionTask)
-                    }
-                    return oldValue
-                    
-                }
-                switch snapShot {
-                case .waiting:
-                    break
-                case .task(let uRLSessionTask):
-                    uRLSessionTask.cancel()
-                case .cancelled:
-                    sessionTask.cancel()
+                    let value = try transform(data).get()
+                    continuation.resume(returning: (value, response))
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
+            sessionTask.resume()
+            
+            let snapShot = stateLock.withLock{
+                let oldValue = $0
+                switch oldValue {
+                case .cancelled:
+                    break
+                case .task:
+                    assertionFailure("unexpected state")
+                    fallthrough
+                case .waiting:
+                    $0 = .task(sessionTask)
+                }
+                return oldValue
+                
+            }
+            switch snapShot {
+            case .waiting:
+                break
+            case .task(let uRLSessionTask):
+                uRLSessionTask.cancel()
+            case .cancelled:
+                sessionTask.cancel()
+            }
+            
         }
     } onCancel: {
         stateLock.withLock{
