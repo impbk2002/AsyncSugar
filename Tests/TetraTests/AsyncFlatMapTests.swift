@@ -7,7 +7,6 @@
 
 import XCTest
 import Combine
-import AsyncAlgorithms
 @testable import Tetra
 
 final class AsyncFlatMapTests: XCTestCase {
