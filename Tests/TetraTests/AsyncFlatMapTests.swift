@@ -180,7 +180,7 @@ final class AsyncFlatMapTests: XCTestCase {
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
             .setFailureType(to: Error.self)
-            .asyncFlatMap(maxTasks: .unlimited) { value in
+            .asyncFlatMap(maxTasks: .max(1)) { value in
                 if value == 3 {
                     throw CancellationError()
                 }
@@ -207,7 +207,7 @@ final class AsyncFlatMapTests: XCTestCase {
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
             .setFailureType(to: Error.self)
-            .asyncFlatMap(maxTasks: .unlimited) { value in
+            .asyncFlatMap(maxTasks: .max(1)) { value in
   
                 return AsyncStream<Int>{
                     $0.yield(value)
