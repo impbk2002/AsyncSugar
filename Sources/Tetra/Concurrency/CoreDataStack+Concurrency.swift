@@ -147,10 +147,13 @@ extension TetraExtension where Base: NSManagedObjectContext {
     
     /// Asynchronously performs the specified closure on the context’s queue.
     @inlinable
+    @_unsafeInheritExecutor
     public func perform<T>(
+        schedule: CoreDataScheduledTaskType = .immediate,
         _ body: () throws -> T
     ) async rethrows -> T {
         /*
+         
          Since this method and NSManagedObjectContext peform has no actor preference and isolation restriction.
          These two are always called on global nonisolated context (Actor switching happen).
          Which means that `immediate` execution option is totally no-op.
@@ -158,19 +161,29 @@ extension TetraExtension where Base: NSManagedObjectContext {
          
          - `_performImmediate:` is never called when using `NSManagedObjectContext.perform(schedule: .immediate)` in iOS 15 ~ iOS 17
          
+         - @_unsafeInheritExecutor do fix the above problem
          */
-         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-             try await withoutActuallyEscaping(body) {
+        return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
+            try await withoutActuallyEscaping(body) {
                 let holder = ClosureHolder(closure: $0)
-                 defer {
-                     withExtendedLifetime(holder, { })
-                 }
-                 return try await base.perform(schedule: .enqueued) { [unowned holder] in
-                     try holder.closure()
-                 }
+                defer {
+                    withExtendedLifetime(holder, { })
+                }
+                return try await base.perform(schedule: schedule.platformValue) { [unowned holder] in
+                    try holder.closure()
+                }
             }
-        } else {
+        } else if schedule == .enqueued {
             try await _performEnqueue(body)
+        } else {
+            if let result = try _performImmediate(body) {
+                switch result {
+                case .success(let success):
+                    success
+                }
+            } else {
+                try await _performEnqueue(body)
+            }
         }
     }
     
@@ -250,8 +263,7 @@ extension TetraExtension where Base: NSPersistentContainer {
     
 }
 
-@usableFromInline
-internal enum CoreDataScheduledTaskType: Sendable, Hashable {
+public enum CoreDataScheduledTaskType: Sendable, Hashable {
     
     case immediate
     
