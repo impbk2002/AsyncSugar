@@ -20,9 +20,14 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     @usableFromInline
     internal func _perform<T,Failure:Error>(_ body: () throws(Failure) -> T) async throws(Failure) -> T {
         let value:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+            let holder = ClosureHolder(closure: escapingClosure)
+            defer {
+                withExtendedLifetime(holder, {})
+            }
             return await withUnsafeContinuation { continuation in
-                base.perform {
-                    continuation.resume(returning: wrapToResult(escapingClosure))
+                base.perform { [unowned holder, continuation] in
+                    let result = wrapToResult(holder.closure)
+                    continuation.resume(returning: consume result)
                 }
             }
         }
@@ -32,7 +37,15 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     @inlinable
     public func perform<T>(_ body: () throws -> T) async rethrows -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try await withoutActuallyEscaping(body) { try await base.perform($0) }
+            try await withoutActuallyEscaping(body) { 
+                let block = ClosureHolder(closure: $0)
+                defer {
+                    withExtendedLifetime(block, {})
+                }
+                return try await base.perform{ [unowned block] in
+                    try block()
+                }
+            }
         } else {
             try await _perform(body)
         }
@@ -94,10 +107,16 @@ extension TetraExtension where Base: NSManagedObjectContext {
     internal func _performEnqueue<T,Failure:Error>(
         _ body: () throws(Failure) -> T
     ) async throws(Failure) -> T {
-        let result:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
-            await withUnsafeContinuation { continuation in
-                base.perform{
-                    continuation.resume(returning: wrapToResult(escapingClosure))
+        let result: Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+            let holder = ClosureHolder(closure: escapingClosure)
+            defer {
+                withExtendedLifetime(holder, {})
+            }
+
+            return await withUnsafeContinuation { continuation in
+                base.perform{ [unowned holder, continuation] in
+                    let result = wrapToResult(holder.closure)
+                    continuation.resume(returning: consume result)
                 }
             }
         }
@@ -118,9 +137,15 @@ extension TetraExtension where Base: NSManagedObjectContext {
          - `_performImmediate:` is never called when using `NSManagedObjectContext.perform(schedule: .immediate)` in iOS 15 ~ iOS 17
          
          */
-         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-             try await withoutActuallyEscaping(body) {
-                try await base.perform(schedule: .enqueued, $0)
+        return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
+            try await withoutActuallyEscaping(body) {
+                let block = ClosureHolder(closure: $0)
+                defer {
+                    withExtendedLifetime(block, {})
+                }
+                return try await base.perform(schedule: .enqueued) { [unowned block] in
+                    return try block()
+                }
             }
         } else {
             try await _performEnqueue(body)
@@ -155,7 +180,13 @@ extension TetraExtension where Base: NSPersistentContainer {
     @inlinable
     public func performBackground<T>(_ body: (NSManagedObjectContext) throws -> T) async rethrows -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try await withoutActuallyEscaping(body) { try await base.performBackgroundTask($0) }
+            try await withoutActuallyEscaping(body) {
+                let block = CoreDataContextClosureHolder(closure: $0)
+                defer { withExtendedLifetime(block, {}) }
+                return try await base.performBackgroundTask{ [unowned block] in
+                    try block($0)
+                }
+            }
         } else {
             try await _performBackground(body)
         }
@@ -175,11 +206,15 @@ extension TetraExtension where Base: NSPersistentContainer {
     
     @usableFromInline
     internal func _performBackground<T,Failure:Error>(_ body: (NSManagedObjectContext) throws(Failure) -> T) async throws(Failure) -> T {
-        let result =  await withoutActuallyEscaping(body) { escapingClosure in
-             await withUnsafeContinuation { continuation in
-                base.performBackgroundTask { newContext in
-                    let result = _convertToResult(newContext, escapingClosure)
-                    continuation.resume(returning: result)
+        let result:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+            let holder = CoreDataContextClosureHolder(closure: escapingClosure)
+            defer {
+                withExtendedLifetime(holder, {})
+            }
+            return await withUnsafeContinuation { continuation in
+                base.performBackgroundTask { [unowned holder, continuation] newContext in
+                    let result = _convertToResult(newContext, holder.closure)
+                    continuation.resume(returning: consume result)
                 }
             }
         }
