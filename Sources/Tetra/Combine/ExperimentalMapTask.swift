@@ -137,7 +137,9 @@ extension MultiMapTask {
             }
             var demand = subscriber.receive(value)
             guard maxTasks != .unlimited else {
-                subscription.request(demand)
+                if demand > .none {
+                    subscription.request(demand)
+                }
                 return
             }
             demand = state.withLockUnchecked{
