@@ -48,8 +48,11 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     public func perform<T>(_ body: () throws -> T) async rethrows -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
             try await withoutActuallyEscaping(body) {
-                
-                try await base.perform($0)
+                let holder = ClosureHolder(closure: $0)
+                defer { withExtendedLifetime(holder, {})}
+                return try await base.perform{ [unowned holder] in
+                    try holder.closure()
+                }
             }
         } else {
             try await _perform(body)
@@ -158,7 +161,13 @@ extension TetraExtension where Base: NSManagedObjectContext {
          */
          return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
              try await withoutActuallyEscaping(body) {
-                try await base.perform(schedule: .enqueued, $0)
+                let holder = ClosureHolder(closure: $0)
+                 defer {
+                     withExtendedLifetime(holder, { })
+                 }
+                 return try await base.perform(schedule: .enqueued) { [unowned holder] in
+                     try holder.closure()
+                 }
             }
         } else {
             try await _performEnqueue(body)
@@ -198,7 +207,15 @@ extension TetraExtension where Base: NSPersistentContainer {
     @inlinable
     public func performBackground<T>(_ body: (NSManagedObjectContext) throws -> T) async rethrows -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try await withoutActuallyEscaping(body) { try await base.performBackgroundTask($0) }
+            try await withoutActuallyEscaping(body) {
+                let holder = CoreDataContextClosureHolder(closure: $0)
+                defer {
+                    withExtendedLifetime(holder, { })
+                }
+                return try await base.performBackgroundTask{ [unowned holder] in
+                    try holder.closure($0)
+                }
+            }
         } else {
             try await _performBackground(body)
         }
