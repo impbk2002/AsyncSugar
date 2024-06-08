@@ -137,7 +137,7 @@ extension AsyncSequencePublisher {
                 for await var pending in demandSource.stream {
                     while pending > .none {
                         pending -= 1
-                        guard let result = await wrapToResult(&iterator) else {
+                        guard let result = await wrapToResult(nil, &iterator) else {
                             send(completion: .finished)
                             return
                         }

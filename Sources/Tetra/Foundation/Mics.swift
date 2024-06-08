@@ -92,9 +92,12 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
 @inline(__always)
 @usableFromInline
 internal
-func wrapToResult<Base: AsyncIteratorProtocol>(_ iterator: inout Base) async -> Result<Base.Element,Base.Failure>? {
+func wrapToResult<Base: AsyncIteratorProtocol>(
+    _ actor: isolated (any Actor)?,
+    _ iterator: inout Base
+) async -> Result<Base.Element,Base.Failure>? {
     do {
-        let value = try await iterator.next(isolation: nil)
+        let value = try await iterator.next(isolation: actor)
         if let value {
             return .success(value)
         } else {

@@ -44,7 +44,11 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         let parent:NotificationSequence
 
         public func next() async -> Notification? {
-//            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
+            await next(isolation: nil)
+        }
+        
+        public func next(isolation actor: isolated (any Actor)?) async throws(Never) -> Notification? {
+            //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(
                 operation: parent.next,
                 onCancel: parent.cancel
