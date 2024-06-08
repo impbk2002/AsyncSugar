@@ -116,16 +116,3 @@ internal func wrapToResult<T,Failure:Error, U>(_ value:T, _ transform: (T) async
         return .failure(error)
     }
 }
-
-/// use only when there is no way to prove no data race is occur to the compiler
-@usableFromInline
-struct SuppressSendable<T>: @unchecked Sendable {
-    
-    @usableFromInline
-    var wrapped:T
-    
-    @usableFromInline
-    init(wrapped: T) {
-        self.wrapped = wrapped
-    }
-}

@@ -26,8 +26,9 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
             }
             return await withUnsafeContinuation { continuation in
                 base.perform { [unowned holder, continuation] in
+                    nonisolated(unsafe)
                     let result = wrapToResult(holder.closure)
-                    continuation.resume(returning: consume result)
+                    continuation.resume(returning: result)
                 }
             }
         }
@@ -115,8 +116,9 @@ extension TetraExtension where Base: NSManagedObjectContext {
 
             return await withUnsafeContinuation { continuation in
                 base.perform{ [unowned holder, continuation] in
+                    nonisolated(unsafe)
                     let result = wrapToResult(holder.closure)
-                    continuation.resume(returning: consume result)
+                    continuation.resume(returning: result)
                 }
             }
         }
@@ -222,8 +224,9 @@ extension TetraExtension where Base: NSPersistentContainer {
             }
             return await withUnsafeContinuation { continuation in
                 base.performBackgroundTask { [unowned holder, continuation] newContext in
+                    nonisolated(unsafe)
                     let result = _convertToResult(newContext, holder.closure)
-                    continuation.resume(returning: consume result)
+                    continuation.resume(returning: result)
                 }
             }
         }

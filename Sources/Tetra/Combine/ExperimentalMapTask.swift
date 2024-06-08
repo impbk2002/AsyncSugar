@@ -221,9 +221,10 @@ extension MultiMapTask {
                          
                          Because polling add queueing taskGroup is implemented in Busy waiting atomic alogrithnm.
                          */
-                        let unsafe = SuppressSendable(wrapped: group.makeAsyncIterator())
+                        nonisolated(unsafe)
+                        let unsafe = group.makeAsyncIterator()
                         async let subTask:() = {
-                            var iterator = unsafe.wrapped
+                            var iterator = unsafe
                             while let _ = try await iterator.next() {
                                 
                             }

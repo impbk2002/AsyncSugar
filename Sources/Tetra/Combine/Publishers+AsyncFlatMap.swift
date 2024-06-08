@@ -100,10 +100,13 @@ extension AsyncFlatMap {
                 } else {
                     let void:Void? = try? await withThrowingTaskGroup(of: Void.self) { group in
                         defer { terminateStream() }
-                        let unsafe = SuppressSendable(wrapped: group.makeAsyncIterator())
+                        nonisolated(unsafe)
+                        let unsafe = group.makeAsyncIterator()
                         async let subTask:() = {
-                            var iterator = unsafe.wrapped
-                            while let _ = try await iterator.next() { }
+                            var iterator = unsafe
+                            while let _ = try await iterator.next() {
+                                
+                            }
                         }()
                         try await localTask(group: &group)
                         try await subTask
