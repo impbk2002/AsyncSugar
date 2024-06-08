@@ -64,7 +64,14 @@ struct AsyncSubscriberState<Input, Failure:Error> {
         consuming func run() {
             switch consume self {
             case .resumeValue(let continuation, let input):
-                continuation.resume(returning: .success(input))
+                nonisolated(unsafe)
+                let value = Result<Input,Failure>.success(consume input)
+                // just to suppress sendable warning
+                @inline(__always)
+                func send(_ value:sending Result<Input,Failure>) {
+                    continuation.resume(returning: value)
+                }
+                send(value)
             case .request(let subscription, let demand):
                 subscription.request(demand)
             case .cancel(let array, let subscription):
