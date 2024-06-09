@@ -72,16 +72,25 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         
         self.center = center
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
-            lock.withLockUnchecked { state in
+            nonisolated(unsafe)
+            let noti = consume notification
+            let continuation = lock.withLockUnchecked { state in
                 let captured = state.pending.first
 
                 if state.pending.isEmpty {
-                    state.buffer.append(notification)
+                    state.buffer.append(noti)
                 } else {
                     state.pending.removeFirst()
                 }
                 return captured
-            }?.resume(returning: notification)
+            }
+            // just to suppress sendable warning
+            // it is unsafe to do this thing, since NotificationCenter broadcast and share Notifiaction among listeners, but for now there is no way to handle this clearly.
+            @inline(__always)
+            func resume(_ noti: sending Notification) {
+                continuation?.resume(returning: noti)
+            }
+            resume(noti)
         }
         lock.withLockUnchecked{
             $0.observer = observer
