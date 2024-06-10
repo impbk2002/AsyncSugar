@@ -86,14 +86,14 @@ extension MultiMapTask {
             while let upstreamValue = await iterator.next() {
                 switch upstreamValue {
                 case .failure(let failure):
-                    send(completion: .failure(failure))
+                    send(completion: .failure(failure), cancel: false)
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
                         let result = await wrapToResult(success, transform)
                         switch result {
                         case .failure(let error):
-                            send(completion: .failure(error))
+                            send(completion: .failure(error), cancel: true)
                             throw CancellationError()
                         case .success(let success):
                             try send(success)
@@ -110,15 +110,16 @@ extension MultiMapTask {
             valueSource.continuation.finish()
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
+        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
+            terminateStream()
             let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
-                let effect = if completion != nil {
-                    $0.upstreamSubscription.transition(.finish)
-                } else {
-                    $0.upstreamSubscription.transition(.cancel)
-                }
                 $0.subscriber = nil
+                let effect = if cancel {
+                    $0.upstreamSubscription.transition(.cancel)
+                } else {
+                    $0.upstreamSubscription.transition(.finish)
+                }
                 return (old, effect)
             }
             effect?.run()
@@ -237,7 +238,7 @@ extension MultiMapTask {
                 }
                 send(completion: .finished)
             } onCancel: {
-                send(completion: nil)
+                send(completion: nil, cancel: true)
             }
         }
         

@@ -91,11 +91,11 @@ extension MapTask {
             state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
+        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
             let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                let effect = if completion == nil {
+                let effect = if cancel {
                     $0.upstreamSubscription.transition(.cancel)
                 } else {
                     $0.upstreamSubscription.transition(.finish)
@@ -186,18 +186,26 @@ extension MapTask {
                 }
             }
             try? await withTaskCancellationHandler {
-                for await result in stream {
-                    switch result {
+                for await upstreamResult in valueSource.stream {
+                    let upValue: Upstream.Output
+                    switch upstreamResult {
+                    case .failure(let error):
+                        send(completion: .failure(error), cancel: false)
+                        throw CancellationError()
+                    case .success(let value):
+                        upValue = value
+                    }
+                    switch (await transform(upValue)) {
+                    case .failure(let error):
+                        send(completion: .failure(error), cancel: true)
+                        throw CancellationError()
                     case .success(let value):
                         try send(value)
-                    case .failure(let error):
-                        send(completion: .failure(error))
-                        throw CancellationError()
                     }
                 }
                 send(completion: .finished)
             } onCancel: {
-                send(completion: nil)
+                send(completion: nil, cancel: true)
             }
 
         }

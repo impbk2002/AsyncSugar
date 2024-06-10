@@ -82,12 +82,19 @@ extension TryMapTask {
             state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLockUnchecked{
+        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
+            terminateStream()
+            let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                return old
+                let effect = if cancel {
+                    $0.condition.transition(.cancel)
+                } else {
+                    $0.condition.transition(.finish)
+                }
+                return (old, effect)
             }
+            effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
@@ -162,21 +169,32 @@ extension TryMapTask {
             guard subscription != nil else {
                 return
             }
-            let stream = valueSource.stream.map(transform)
+            var iterator = valueSource.stream.makeAsyncIterator()
             await withTaskCancellationHandler {
-                do {
-                    for try await value in stream {
+                while true {
+                    let upValue:Upstream.Output
+                    do {
+                        guard let value = try await iterator.next() else {
+                            send(completion: .finished, cancel: false)
+                            return
+                        }
+                        upValue = value
+                    } catch {
+                        send(completion: .failure(error), cancel: false)
+                        return
+                    }
+                    do {
+                        let value = try await transform(upValue)
                         guard let _ = try? send(value) else {
                             return
                         }
+                    } catch {
+                        send(completion: .failure(error), cancel: true)
+                        return
                     }
-                    send(completion: .finished)
-                } catch {
-                    send(completion: .failure(error))
-                    return
                 }
             } onCancel: {
-                send(completion: nil)
+                send(completion: nil, cancel: true)
             }
 
         }
