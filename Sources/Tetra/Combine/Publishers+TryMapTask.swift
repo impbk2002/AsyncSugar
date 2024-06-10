@@ -36,9 +36,12 @@ public struct TryMapTask<Upstream:Publisher, Output:Sendable>: Publisher where U
     public typealias Failure = any Error
 
     public let upstream:Upstream
-    public var transform:@Sendable (Upstream.Output) async throws -> Output
+    public var transform: @isolated(any) @Sendable (Upstream.Output) async throws -> Output
 
-    public init(upstream: Upstream, transform: @escaping @Sendable (Upstream.Output) async throws -> Output) {
+    public init(
+        upstream: Upstream,
+        transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws -> Output
+    ) {
         self.upstream = upstream
         self.transform = transform
     }

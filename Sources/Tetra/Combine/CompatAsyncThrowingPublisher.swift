@@ -31,9 +31,12 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         
         @inlinable
         public mutating func next(isolation actor: isolated (any Actor)?) async throws(P.Failure) -> P.Output? {
-            let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
+            let result = await withTaskCancellationHandler { [inner] in
+                await inner.next(isolation: actor)
+            } onCancel: { [reference] in
                 reference.cancel()
             }
+
             switch result {
             case .failure(let failure):
                 throw failure

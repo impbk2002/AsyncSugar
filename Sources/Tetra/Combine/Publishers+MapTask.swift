@@ -39,16 +39,22 @@ public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upst
     public typealias Failure = Upstream.Failure
 
     public let upstream:Upstream
-    public var transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+    public var transform:@Sendable @isolated(any) (Upstream.Output) async -> Result<Output,Failure>
 
-    public init(upstream: Upstream, transform: @escaping @Sendable (Upstream.Output) async -> Output) {
+    public init(
+        upstream: Upstream,
+        transform: @escaping @Sendable @isolated(any) (Upstream.Output) async -> Output
+    ) {
         self.upstream = upstream
         self.transform = {
             Result.success(await transform($0))
         }
     }
     
-    public init(upstream: Upstream, handler: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
+    public init(
+        upstream: Upstream,
+        handler: @escaping @Sendable @isolated(any) (Upstream.Output) async -> Result<Output,Failure>
+    ) {
         self.upstream = upstream
         self.transform = handler
     }
@@ -176,14 +182,6 @@ extension MapTask {
             }?.receive(subscription: self)
             guard success != nil else {
                 return
-            }
-            let stream = valueSource.stream.map{ [transform] in
-                switch $0 {
-                case .success(let value):
-                    return await transform(value)
-                case .failure(let failure):
-                    return .failure(failure)
-                }
             }
             try? await withTaskCancellationHandler {
                 for await upstreamResult in valueSource.stream {

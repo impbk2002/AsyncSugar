@@ -37,7 +37,7 @@ public struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where
     public init(
         maxTasks: Subscribers.Demand = .max(1),
         upstream: Upstream,
-        transform: @Sendable @escaping (Upstream.Output) async throws(Failure) -> Output
+        transform: @Sendable @escaping @isolated(any) (Upstream.Output) async throws(Failure) -> Output
     ) {
         precondition(maxTasks != .none, "maxTasks can not be zero")
         self.maxTasks = maxTasks

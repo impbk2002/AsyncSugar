@@ -12,7 +12,7 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Erro
     
     typealias Output = Segment.Element
     typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.Failure>
-    typealias Transform = @Sendable (Upstream.Output) async throws(TransformFail) -> Segment
+    typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> Segment
     let maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
@@ -143,8 +143,14 @@ extension AsyncFlatMap {
         
         func receive(subscription: any Subscription) {
             let (effect, requestValue) = lock.withLockUnchecked{
+                let requestValue:Bool
+                switch $0.upstreamSubscription {
+                case .waiting, .suspending:
+                    requestValue = true
+                default:
+                    requestValue = false
+                }
                 let effect = $0.upstreamSubscription.transition(.resume(subscription))
-                let requestValue = subscription.combineIdentifier == $0.upstreamSubscription.subscription?.combineIdentifier
                 return (effect, requestValue)
             }
             effect?.run()

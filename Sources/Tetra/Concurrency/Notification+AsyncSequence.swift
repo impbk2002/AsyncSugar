@@ -50,7 +50,9 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         public func next(isolation actor: isolated (any Actor)?) async throws(Never) -> Notification? {
             //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(
-                operation: parent.next,
+                operation: { [parent] in
+                    await parent.next(isolation: actor)
+                },
                 onCancel: parent.cancel
             )
         }
@@ -117,8 +119,8 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         snapShot.pending.forEach{ $0.resume(returning: nil) }
     }
     
-    func next() async -> Notification? {
-        await withUnsafeContinuation { continuation in
+    func next(isolation: isolated (any Actor)?) async -> Notification? {
+        await withUnsafeContinuation(isolation: isolation) { continuation in
             let (notification, isCancelled) = lock.withLockUnchecked { state in
                 if !state.buffer.isEmpty {
                     return (state.buffer.removeFirst() as Notification?, false)

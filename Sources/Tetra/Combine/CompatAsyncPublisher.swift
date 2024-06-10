@@ -42,6 +42,7 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
             let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
                 reference.cancel()
             }
+
             switch result {
             case .none:
                 return nil

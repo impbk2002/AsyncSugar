@@ -52,8 +52,10 @@ internal struct AsyncSubscriber<P:Publisher>: Sendable, Subscriber, Cancellable 
     }
     
     @usableFromInline
-    func next() async -> Result<Input,Failure>? {
-        return await withUnsafeContinuation { continuation in
+    func next(
+        isolation: isolated (any Actor)?
+    ) async -> Result<Input,Failure>? {
+        return await withUnsafeContinuation(isolation: isolation) { continuation in
             lock.withLockUnchecked{
                 $0.transition(.suspend(continuation))
             }?.run()
