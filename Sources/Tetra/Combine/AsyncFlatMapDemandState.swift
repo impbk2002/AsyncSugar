@@ -12,7 +12,7 @@ import DequeModule
 struct AsyncFlatMapDemandState: Sendable {
     
     private var suspended:Deque<Element> = []
-    private var pending = Subscribers.Demand.none
+    private(set) var pending = Subscribers.Demand.none
     private var isInterrupted = false
     typealias Element = UnsafeContinuation<Bool,any Error>
     

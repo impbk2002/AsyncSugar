@@ -47,12 +47,18 @@ public extension Publisher {
         MultiMapTask(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     
-    internal
-    func asyncFlatMap<Segment:AsyncSequence>(
+
+    
+}
+
+@available(macOS 9999, *)
+internal extension Publisher {
+    
+    func asyncFlatMap<Segment:AsyncSequence, Err:Error>(
         maxTasks: Subscribers.Demand = .unlimited,
-        transform: @escaping @Sendable (Output) async throws -> Segment
-    ) -> AsyncFlatMap<Self,Segment> where Failure == any Error {
-        return .init(maxTasks: maxTasks, upstream: self, transform: transform)
+        transform: @escaping @Sendable (Output) async throws(Err) -> Segment
+    ) -> AsyncFlatMap<Self, Segment, Err> where Output:Sendable {
+        return AsyncFlatMap(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     
 }

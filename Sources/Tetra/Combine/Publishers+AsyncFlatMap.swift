@@ -8,11 +8,11 @@
 import Foundation
 @preconcurrency import Combine
 
-struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence>: Publisher where Upstream.Output:Sendable, Upstream.Failure == any Error {
+struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable {
     
     typealias Output = Segment.Element
-    typealias Failure = any Error
-    typealias Transform = @Sendable (Upstream.Output) async throws(Failure) -> Segment
+    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.Failure>
+    typealias Transform = @Sendable (Upstream.Output) async throws(TransformFail) -> Segment
     let maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
@@ -39,11 +39,11 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence>: Publisher where U
 extension AsyncFlatMap {
     
     struct Inner<Down:Subscriber>: Subscriber, Sendable, Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible
-    where Segment.Element == Down.Input, Down.Failure == Failure {
+    where Segment.Element == Down.Input, Down.Failure == AsyncFlatMap.Failure {
         
-        typealias Transformer = @Sendable (Upstream.Output) async throws(Failure) -> Segment
+        typealias Transformer = @Sendable (Upstream.Output) async throws(TransformFail) -> Segment
         typealias Input = Upstream.Output
-        typealias Failure = any Error
+        typealias Failure = Upstream.Failure
         
         
         let lock:some UnfairStateLock<TaskState> = createUncheckedStateLock(uncheckedState: TaskState())
@@ -57,7 +57,7 @@ extension AsyncFlatMap {
         
         let maxTasks:Subscribers.Demand
         let transform:Transformer
-        let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream()
+        let valueSource = AsyncStream<Result<Upstream.Output,Upstream.Failure>>.makeStream()
         let combineIdentifier = CombineIdentifier()
         
         
@@ -131,7 +131,7 @@ extension AsyncFlatMap {
             return .none
         }
         
-        func receive(completion: Subscribers.Completion<Down.Failure>) {
+        func receive(completion: Subscribers.Completion<Upstream.Failure>) {
             switch completion {
             case .finished:
                 break
@@ -165,7 +165,7 @@ extension AsyncFlatMap {
             }?.run()
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
+        private func send(completion: Subscribers.Completion<AsyncFlatMap.Failure>?) {
             let (subscriber, effect, interruption) = lock.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
@@ -236,7 +236,7 @@ extension AsyncFlatMap {
         }
         
         private func makeSegment(_ input:Upstream.Output) async throws(CancellationError) -> Segment {
-            let result:Result<Segment,Failure>
+            let result:Result<Segment,TransformFail>
             do {
                 let seg = try await transform(input)
                 result = .success(seg)
@@ -247,7 +247,7 @@ extension AsyncFlatMap {
             case .success(let success):
                 return success
             case .failure(let failure):
-                send(completion: .failure(failure))
+                send(completion: .failure(.transform(failure)))
                 throw CancellationError()
             }
         }
@@ -270,35 +270,33 @@ extension AsyncFlatMap {
         private func processNextSegment(
             iterator: inout Segment.AsyncIterator
         ) async throws(CancellationError) -> Bool {
-            let nextResult:Result<Down.Input, Failure>?
-            do {
-                let value = try await iterator.next()
-                if let value {
-                    nextResult = .success(value)
-                } else {
-                    nextResult = nil
-                }
-            } catch {
-                nextResult = .failure(error)
-            }
+            let nextResult = await wrapToResult(nil, &iterator)
             switch nextResult {
             case .none:
                 //finished
                 // check and request more transformer
                 // request one more from upstream subscription
                 if maxTasks != .unlimited {
-                    let subscription = lock.withLockUnchecked{
-                        $0.upstreamSubscription.subscription
+                    let (subscription, effect) = lock.withLockUnchecked{
+                        let effect = if $0.demandState.pending == .unlimited {
+                            $0.demandState.transition(.resume(.none))
+                        } else {
+                            // reclaim discarded demand
+                            $0.demandState.transition(.resume(.max(1)))
+                        }
+                        let subscription = $0.upstreamSubscription.subscription
+                        return (subscription, effect)
                     }
                     if let subscription {
                         subscription.request(.max(1))
+                        effect?.run()
                     } else {
                         throw CancellationError()
                     }
                 }
                 return false
             case .failure(let error):
-                send(completion: .failure(error))
+                send(completion: .failure(.segment(error)))
                 throw CancellationError()
             case .success(let value):
                 try send(value)
@@ -312,7 +310,7 @@ extension AsyncFlatMap {
             for await result in valueSource.stream {
                 switch result {
                 case .failure(let failure):
-                    send(completion: .failure(failure))
+                    send(completion: .failure(.upstream(failure)))
                     throw CancellationError()
                 case .success(let value):
                     let isSuccess = group.addTaskUnlessCancelled(priority: nil) {

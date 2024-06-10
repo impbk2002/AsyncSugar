@@ -73,12 +73,12 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         self.center = center
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
             nonisolated(unsafe)
-            let noti = consume notification
+            let noti2 = notification
             let continuation = lock.withLockUnchecked { state in
                 let captured = state.pending.first
 
                 if state.pending.isEmpty {
-                    state.buffer.append(noti)
+                    state.buffer.append(noti2)
                 } else {
                     state.pending.removeFirst()
                 }
@@ -90,7 +90,7 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
             func resume(_ noti: sending Notification) {
                 continuation?.resume(returning: noti)
             }
-            resume(noti)
+            resume(noti2)
         }
         lock.withLockUnchecked{
             $0.observer = observer

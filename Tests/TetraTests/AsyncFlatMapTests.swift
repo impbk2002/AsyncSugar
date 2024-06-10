@@ -22,7 +22,6 @@ final class AsyncFlatMapTests: XCTestCase {
                     XCTAssertEqual($0, .max(1))
                 }
             )
-            .setFailureType(to: Error.self)
             .asyncFlatMap(maxTasks: .max(1)) { value in
                 AsyncStream<Int>{ continuation in
                     sample.forEach{
@@ -37,13 +36,16 @@ final class AsyncFlatMapTests: XCTestCase {
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }
-            )
+            ).mapError{ $0.unwrap() }
+            // ensure downstream do not request unlimited
+            .buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
+            .prefix(10)
             .sink { _ in
                 completion.fulfill()
             } receiveValue: {
                 array.append($0)
             }
-        wait(for: [completion])
+        wait(for: [completion], timeout: 0.1)
         bag.cancel()
         XCTAssertEqual(array, sample + sample)
     }
@@ -59,7 +61,6 @@ final class AsyncFlatMapTests: XCTestCase {
                     XCTAssertEqual($0, .max(2))
                 }
             )
-            .setFailureType(to: Error.self)
             .asyncFlatMap(maxTasks: .max(2)) { value in
                 return AsyncStream<Int>{ continuation in
                     sample.forEach{
@@ -74,7 +75,7 @@ final class AsyncFlatMapTests: XCTestCase {
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }
-            )
+            ).mapError{ $0.unwrap() }
             .sink { _ in
                 completion.fulfill()
             } receiveValue: { value in
@@ -94,7 +95,6 @@ final class AsyncFlatMapTests: XCTestCase {
         let lock = NSRecursiveLock()
         lock.withLock {
             (0..<5).publisher
-                .setFailureType(to: Error.self)
                 .asyncFlatMap(maxTasks: .unlimited) { value in
                     lock.withLock{
                         holder.bag = []
@@ -103,7 +103,8 @@ final class AsyncFlatMapTests: XCTestCase {
                         $0.yield(value)
                         $0.finish()
                     }
-                }.handleEvents(
+                }.mapError{ $0.unwrap() }
+                .handleEvents(
                     receiveCancel: {
                         completion.fulfill()
                     }
@@ -122,7 +123,6 @@ final class AsyncFlatMapTests: XCTestCase {
         let lock = NSRecursiveLock()
         lock.withLock {
             (0..<5).publisher
-                .setFailureType(to: Error.self)
                 .asyncFlatMap(maxTasks: .unlimited) { value in
                     return AsyncStream<Int>{
                         $0.yield(value)
@@ -133,7 +133,8 @@ final class AsyncFlatMapTests: XCTestCase {
                         }
                         return $0
                     }
-                }.handleEvents(
+                }.mapError{ $0.unwrap() }
+                .handleEvents(
                     receiveCancel: {
                         completion.fulfill()
                     }
@@ -152,14 +153,15 @@ final class AsyncFlatMapTests: XCTestCase {
         let lock = NSRecursiveLock()
         lock.withLock {
             (0..<5).publisher
-                .setFailureType(to: Error.self)
-                .asyncFlatMap(maxTasks: .unlimited) { value in
-                    return AsyncStream<Int>{
+                .asyncFlatMap(maxTasks: .unlimited) { @Sendable value in
+                    return AsyncStream<Int>{ @Sendable in
                         $0.yield(value)
                         $0.finish()
                     }
+                }.mapError{
+                    $0.unwrap()
                 }.handleEvents(
-                    receiveCancel: {
+                    receiveCancel: { @Sendable in
                         completion.fulfill()
                     }
                 ).sink { _ in
@@ -174,11 +176,11 @@ final class AsyncFlatMapTests: XCTestCase {
     }
     
     
+    @available(macOS 9999, *)
     func testThrowInTransformer() throws {
         let holder = UnsafeCancellableHolder()
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
-            .setFailureType(to: Error.self)
             .asyncFlatMap(maxTasks: .max(1)) { value in
                 if value == 3 {
                     throw CancellationError()
@@ -187,6 +189,8 @@ final class AsyncFlatMapTests: XCTestCase {
                     $0.yield(value)
                     $0.finish()
                 }
+            }.mapError{
+                $0.unwrap()
             }.sink {
                 switch $0 {
                 case .finished:
@@ -205,9 +209,7 @@ final class AsyncFlatMapTests: XCTestCase {
         let holder = UnsafeCancellableHolder()
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
-            .setFailureType(to: Error.self)
             .asyncFlatMap(maxTasks: .max(1)) { value in
-  
                 return AsyncStream<Int>{
                     $0.yield(value)
                     $0.finish()
@@ -217,7 +219,11 @@ final class AsyncFlatMapTests: XCTestCase {
                     }
                     return $0
                 }
-            }.sink {
+            }
+            .mapError{
+                $0.unwrap()
+            }
+            .sink {
                 switch $0 {
                 case .finished:
                     break
@@ -239,7 +245,6 @@ final class AsyncFlatMapTests: XCTestCase {
         let completion = expectation(description: "complete")
         var buffer = [Int]()
         (0..<5).publisher
-            .setFailureType(to: Error.self)
             .asyncFlatMap(maxTasks: .max(1)) { value in
                 if value == 0 {
                     withUnsafeCurrentTask{
@@ -259,6 +264,8 @@ final class AsyncFlatMapTests: XCTestCase {
                     withUnsafeCurrentTask{$0?.cancel()}
                     return value
                 }
+            }.mapError{
+                $0.unwrap()
             }.sink { _ in
                 completion.fulfill()
             } receiveValue: {
