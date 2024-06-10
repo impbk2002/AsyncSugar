@@ -193,7 +193,9 @@ extension MapTask {
                     case .success(let value):
                         upValue = value
                     }
-                    switch (await transform(upValue)) {
+                    // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
+                    async let job = transform(upValue)
+                    switch (await job) {
                     case .failure(let error):
                         send(completion: .failure(error), cancel: true)
                         throw CancellationError()
