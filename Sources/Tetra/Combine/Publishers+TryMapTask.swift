@@ -182,7 +182,9 @@ extension TryMapTask {
                             return
                         }
                         do {
-                            let value = try await transform(upstreamValue)
+                            // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
+                            async let job = transform(upstreamValue)
+                            let value = try await job
                             guard let newDemand = send(value) else {
                                 return
                             }

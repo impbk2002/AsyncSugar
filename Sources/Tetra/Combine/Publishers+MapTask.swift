@@ -190,7 +190,9 @@ extension MapTask {
                         case .success(let value):
                             upstreamValue = value
                         }
-                        switch (await transform(upstreamValue)) {
+                        // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
+                        async let job = transform(upstreamValue)
+                        switch (await job) {
                         case .success(let value):
                             if let newDemand = send(value) {
                                 demand += newDemand
