@@ -39,7 +39,14 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         
         @inlinable
         public mutating func next() async -> P.Output? {
-            let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
+            return await next(isolation: nil)
+        }
+        
+        @inlinable
+        public func next(isolation actor: isolated (any Actor)?) async -> P.Output? {
+            let result: Result<P.Output,Never>? = await withTaskCancellationHandler { [inner] in
+                await inner.next(isolation: actor)
+            } onCancel: { [reference] in
                 reference.cancel()
             }
 
