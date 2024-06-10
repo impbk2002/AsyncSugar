@@ -166,10 +166,18 @@ extension AsyncFlatMap {
         }
         
         private func send(completion: Subscribers.Completion<AsyncFlatMap.Failure>?) {
+            valueSource.continuation.finish()
+            let shouldCancel:Bool
+            switch completion {
+            case .none, .failure(.segment(_)), .failure(.transform(_)):
+                shouldCancel = true
+            case .failure(.upstream(_)), .finished:
+                shouldCancel = false
+            }
             let (subscriber, effect, interruption) = lock.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                let effect = if completion == nil {
+                let effect = if shouldCancel {
                     $0.upstreamSubscription.transition(.cancel)
                 } else {
                     $0.upstreamSubscription.transition(.finish)

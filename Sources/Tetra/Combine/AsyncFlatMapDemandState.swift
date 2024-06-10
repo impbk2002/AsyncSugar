@@ -55,7 +55,13 @@ struct AsyncFlatMapDemandState: Sendable {
     
     private mutating func resume(_ demand:Subscribers.Demand) -> Effect? {
         if isInterrupted {
-            return nil
+            if suspended.isEmpty {
+                return nil
+            } else {
+                let jobs = suspended
+                suspended = []
+                return .raise(jobs)
+            }
         }
         pending += demand
         return populateResume()
