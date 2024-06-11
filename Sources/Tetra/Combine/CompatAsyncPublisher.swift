@@ -27,7 +27,7 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         self.publisher = publisher
     }
     
-    public struct Iterator: TypedAsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         
         public typealias Element = P.Output
         public typealias Failure = P.Failure
@@ -36,13 +36,7 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         internal let inner = AsyncSubscriber<P>()
         @usableFromInline
         internal let reference:AnyCancellable
-        
-        @inlinable
-        public mutating func next() async -> P.Output? {
-            return await next(isolation: nil)
-        }
-        
-        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
+          
         @inlinable
         public func next(isolation actor: isolated (any Actor)?) async -> P.Output? {
             let result: Result<P.Output,Never>? = await withTaskCancellationHandler { [inner] in

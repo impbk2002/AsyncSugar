@@ -35,17 +35,12 @@ public final class NotificationSequence: AsyncSequence, Sendable {
     let center: NotificationCenter
     private let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
 
-    public struct Iterator: TypedAsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         public typealias Element = Notification
         public typealias Failure = Never
         
         let parent:NotificationSequence
-
-        public func next() async -> Notification? {
-            await next(isolation: nil)
-        }
         
-        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
         public func next(isolation actor: isolated (any Actor)?) async throws(Never) -> Notification? {
             //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(

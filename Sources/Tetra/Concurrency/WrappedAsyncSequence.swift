@@ -6,7 +6,7 @@
 //
 
 
-public struct WrappedAsyncSequence<Base:AsyncSequence>: AsyncSequence {
+public struct WrappedAsyncSequence<Base:AsyncSequence>: AsyncSequence, TypedAsyncSequence {
     
     public typealias AsyncIterator = Iterator
     
@@ -29,14 +29,8 @@ public struct WrappedAsyncSequence<Base:AsyncSequence>: AsyncSequence {
         
         @usableFromInline
         var base:Base.AsyncIterator
-
-        @inlinable
-        public mutating func next() async throws -> Base.Element? {
-            try await base.next()
-        }
         
         @inlinable
-        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
         public mutating func next(isolation actor: isolated (any Actor)?) async throws -> Base.Element? {
             if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
                 return try await base.next(isolation: actor)
@@ -63,7 +57,7 @@ public struct WrappedAsyncSequence<Base:AsyncSequence>: AsyncSequence {
 extension WrappedAsyncSequence: Sendable where Base:Sendable {}
 
 @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
-public struct WrappedAsyncSequenceV2<Base:AsyncSequence>: AsyncSequence {
+public struct WrappedAsyncSequenceV2<Base:AsyncSequence>: AsyncSequence, TypedAsyncSequence {
     
     public typealias Element = Base.Element
     public typealias Failure = Base.Failure
@@ -76,21 +70,14 @@ public struct WrappedAsyncSequenceV2<Base:AsyncSequence>: AsyncSequence {
     @usableFromInline
     var base:Base
     
-    public struct Iterator: TypedAsyncIteratorProtocol {
-        
+    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         
         @usableFromInline
         var base:Base.AsyncIterator
         
         @inlinable
-        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
         public mutating func next(isolation actor: isolated (any Actor)?) async throws(Base.Failure) -> Base.Element? {
             return try await base.next(isolation: actor)
-        }
-        
-        @inlinable
-        public mutating func next() async throws -> Base.Element? {
-            return try await base.next()
         }
         
         @usableFromInline

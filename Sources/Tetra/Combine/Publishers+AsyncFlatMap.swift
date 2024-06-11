@@ -9,19 +9,16 @@ import Foundation
 @preconcurrency import Combine
 
 
-struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable, Segment.AsyncIterator: TypedAsyncIteratorProtocol {
+struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence & TypedAsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable{
     
     typealias Output = Segment.Element
-    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.AsyncIterator.TetraFailure>
+    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.AsyncIterator.Failure>
     typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> sending Segment
     let maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
     
     func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Segment.Element == S.Input {
-        if #available(macOS 15.0, *) {
-            assert(Segment.Failure.self ==  Segment.AsyncIterator.TetraFailure.self, "assert")
-        }
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
         let task = Task(operation: processor.run)
         processor.resumeCondition(task)
@@ -44,7 +41,7 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Erro
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
         transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
-    ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source>, Segment.AsyncIterator.TetraFailure == any Error {
+    ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source>, Segment.AsyncIterator.Failure == any Error {
         let block:Transform = {
             return .init(base: try await transform($0))
         }
@@ -53,20 +50,20 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Erro
         self.transform = block
     }
 
-//    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
-//    @usableFromInline
-//    init<Source>(
-//        maxTasks: Subscribers.Demand,
-//        upstream: Upstream,
-//        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
-//    ) where Source: AsyncSequence, Segment == WrappedAsyncSequenceV2<Source> {
-//        let block:Transform = {
-//            return .init(base: try await typedTransform($0))
-//        }
-//        self.maxTasks = maxTasks
-//        self.upstream = upstream
-//        self.transform = block
-//    }
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+    @usableFromInline
+    init<Source>(
+        maxTasks: Subscribers.Demand,
+        upstream: Upstream,
+        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
+    ) where Source: AsyncSequence, Segment == WrappedAsyncSequenceV2<Source> {
+        let block:Transform = {
+            return .init(base: try await typedTransform($0))
+        }
+        self.maxTasks = maxTasks
+        self.upstream = upstream
+        self.transform = block
+    }
 
     
 }

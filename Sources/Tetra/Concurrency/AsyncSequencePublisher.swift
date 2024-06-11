@@ -19,19 +19,20 @@ public extension AsyncSequence where Self:Sendable {
 
 public extension TetraExtension where Base: AsyncSequence & Sendable {
     
-    @inlinable
-    var publisher:some Publisher<Base.Element, any Error> {
-        AsyncSequencePublisher(base: base)
-    }
+//    @inlinable
+//    var publisher:some Publisher<Base.Element, any Error> {
+//        AsyncSequencePublisher(base: base)
+//    }
     
 }
 
 
 
-public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher where Base.AsyncIterator: TypedAsyncIteratorProtocol {
+internal struct AsyncSequencePublisher<Base: TypedAsyncSequence & Sendable & AsyncSequence>: Publisher {
     
-    public typealias Output = Base.Element
-    public typealias Failure = Base.AsyncIterator.TetraFailure
+    public typealias Output = Base.AsyncIterator.Element
+    
+    public typealias Failure = Base.AsyncIterator.Failure
     
     public var base:Base
     
@@ -50,7 +51,7 @@ public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher 
         self.base = source
     }
     
-    public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.Element == S.Input {
+    public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.AsyncIterator.Element == S.Input {
         let processor = Inner(subscriber: subscriber)
         let task = Task { [base] in
             await processor.run(base)

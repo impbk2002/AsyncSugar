@@ -91,12 +91,12 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
 @inline(__always)
 @usableFromInline
 internal
-func wrapToResult<Base: TypedAsyncIteratorProtocol>(
+func wrapToResult<Base: TypedAsyncIteratorProtocol & AsyncIteratorProtocol>(
     _ actor: isolated (any Actor)?,
     _ iterator: inout Base
-) async -> sending Result<Base.Element,Base.TetraFailure>? {
+) async -> sending Result<Base.Element,Base.Failure>? {
     do {
-        if let value = try await iterator.tetraNext(isolation: actor) {
+        if let value = try await iterator.next(isolation: actor) {
             return .success(value)
         }
         return nil
