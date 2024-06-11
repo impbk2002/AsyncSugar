@@ -39,6 +39,8 @@ enum AsyncSubscriptionState {
         case resume(UnsafeContinuation<Void,any Error>)
         case raise(UnsafeContinuation<Void,any Error>)
         case cancel(any Subscription)
+        // ensure deinit is called outside of lock
+        case discard(any Subscription)
         
         
         consuming func run() {
@@ -49,6 +51,8 @@ enum AsyncSubscriptionState {
                 unsafeContinuation.resume(throwing: CancellationError())
             case .cancel(let subscription):
                 subscription.cancel()
+            case .discard:
+                break
             }
         }
         
@@ -129,7 +133,8 @@ enum AsyncSubscriptionState {
             self = .finished
             return .resume(unsafeContinuation)
         case .cached(let subscription):
-            fallthrough
+            self = .finished
+            return .discard(subscription)
         case .waiting:
             self = .finished
             fallthrough

@@ -56,23 +56,29 @@ struct AsyncSubscriberState<Input, Failure:Error> {
     enum Effect {
         
         case resumeValue(Continuation, Input)
-        case resumeFailure([Continuation], Failure)
+        case resumeFailure([Continuation], Failure, discard: (any Subscription)?)
         case request(any Subscription, Subscribers.Demand)
         case cancel([Continuation], (any Subscription)?)
+        case cancelAndDiscard([Continuation], discard: (any Subscription)?)
+        case discard((any Subscription)?)
         
         @usableFromInline
         consuming func run() {
             switch consume self {
+            case .discard:
+                break
             case .resumeValue(let continuation, let input):
                 nonisolated(unsafe)
                 let value = Result<Input,Failure>.success(consume input)
                 continuation.resume(returning: value)
             case .request(let subscription, let demand):
                 subscription.request(demand)
+            case .cancelAndDiscard(let array, discard: _):
+                array.forEach{ $0.resume(returning: nil) }
             case .cancel(let array, let subscription):
                 array.forEach{ $0.resume(returning: nil) }
                 subscription?.cancel()
-            case .resumeFailure(let array, let failure):
+            case .resumeFailure(let array, let failure, _):
                 array[0].resume(returning: .failure(failure))
                 array.dropFirst().forEach{ $0.resume(returning: nil) }
             }
@@ -100,15 +106,20 @@ struct AsyncSubscriberState<Input, Failure:Error> {
     private mutating func resume(completion: Subscribers.Completion<Failure>) -> Effect? {
         let jobs = pending
         pending.removeAll()
+        let oldSubscription = if case let .subscribed(token) = subscription {
+            token
+        } else {
+            nil as (any Subscription)?
+        }
         switch subscription {
         case .awaitingSubscription, .subscribed:
             if !jobs.isEmpty {
                 subscription = .terminal(nil)
                 switch completion {
                 case .finished:
-                    return .cancel(jobs, nil)
+                    return .cancelAndDiscard(jobs, discard: oldSubscription)
                 case .failure(let failure):
-                    return .resumeFailure(jobs, failure)
+                    return .resumeFailure(jobs, failure, discard: oldSubscription)
                 }
             } else {
                 switch completion {
@@ -117,7 +128,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
                 case .failure(let failure):
                     subscription = .terminal(failure)
                 }
-                return nil
+                return .discard(oldSubscription)
             }
         case .terminal:
             return .cancel(jobs, nil)
@@ -149,7 +160,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
             return .cancel([continuation], nil)
         case .terminal(let failure?):
             subscription = .terminal(nil)
-            return .resumeFailure([continuation], failure)
+            return .resumeFailure([continuation], failure, discard: nil)
         }
     }
     
