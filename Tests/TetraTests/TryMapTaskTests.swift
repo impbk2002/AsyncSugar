@@ -93,5 +93,27 @@ final class TryMapTaskTests: XCTestCase {
         wait(for: [expect], timeout: 0.5)
         bag.removeAll()
     }
+    
+    func testUnsafeCancel() throws {
+        let completion = expectation(description: "completion")
+        var array = [Int]()
+        let token = (0..<100)
+            .publisher
+            .tryMapTask { value in
+                await Task.yield()
+                withUnsafeCurrentTask {
+                    $0?.cancel()
+                }
+                return value
+            }.buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
+            .sink { _ in
+                completion.fulfill()
+            } receiveValue: {
+                array.append($0)
+            }
+        wait(for: [completion], timeout: 0.2)
+        XCTAssertEqual(array, Array(0..<100))
+        token.cancel()
+    }
 
 }

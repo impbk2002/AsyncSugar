@@ -81,12 +81,19 @@ extension TryMapTask {
             state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLockUnchecked{
+        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
+            terminateStream()
+            let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                return old
+                let effect = if cancel {
+                    $0.condition.transition(.cancel)
+                } else {
+                    $0.condition.transition(.finish)
+                }
+                return (old, effect)
             }
+            effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
@@ -156,24 +163,34 @@ extension TryMapTask {
             guard let subscription else {
                 return
             }
-            let stream = valueSource.stream.map(transform)
+            let stream = valueSource.stream
             await withTaskCancellationHandler {
                 var iterator = stream.makeAsyncIterator()
                 for await var demand in demandSource.stream {
                     while demand > .none {
                         demand -= 1
                         subscription.request(.max(1))
+                        let upstreamValue:Upstream.Output
                         do {
                             guard let value = try await iterator.next() else {
-                                send(completion: .finished)
+                                send(completion: .finished, cancel: false)
                                 return
                             }
+                            upstreamValue = value
+                        } catch {
+                            send(completion: .failure(error), cancel: false)
+                            return
+                        }
+                        do {
+                            // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
+                            async let job = transform(upstreamValue)
+                            let value = try await job
                             guard let newDemand = send(value) else {
                                 return
                             }
                             demand += newDemand
                         } catch {
-                            send(completion: .failure(error))
+                            send(completion: .failure(error), cancel: true)
                             return
                         }
                     }

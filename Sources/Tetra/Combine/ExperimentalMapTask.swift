@@ -92,13 +92,13 @@ extension MultiMapTask {
             while let upstreamValue = await iterator.next() {
                 switch upstreamValue {
                 case .failure(let failure):
-                    send(completion: .failure(failure))
+                    send(completion: .failure(failure), cancel: false)
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
                         switch await transform(success) {
                         case .failure(let failure):
-                            send(completion: .failure(failure))
+                            send(completion: .failure(failure), cancel: true)
                             throw CancellationError()
                         case .success(let value):
                             if let demand = send(value) {
@@ -122,12 +122,19 @@ extension MultiMapTask {
             valueSource.continuation.finish()
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?) {
-            let subscriber = state.withLockUnchecked{
+        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
+            terminateStream()
+            let (subscriber, effect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                return old
+                let effect = if cancel {
+                    $0.condition.transition(.cancel)
+                } else {
+                    $0.condition.transition(.finish)
+                }
+                return (old, effect)
             }
+            effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
@@ -238,7 +245,7 @@ extension MultiMapTask {
                 send(completion: .finished)
             } onCancel: {
                 subscription.cancel()
-                send(completion: nil)
+                send(completion: nil, cancel: false)
             }
         }
         
