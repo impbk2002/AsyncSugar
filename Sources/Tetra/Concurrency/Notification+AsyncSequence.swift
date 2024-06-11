@@ -11,14 +11,12 @@ import _Concurrency
 
 extension NotificationCenter: TetraExtended {}
 
+
 extension TetraExtension where Base: NotificationCenter {
     
-    func notifications(named: Notification.Name, object: AnyObject? = nil) -> some AsyncTypedSequence<Notification,Never> {
-        if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            return base.notifications(named: named, object: object)
-        } else {
-            return NotificationSequence(center: base, named: named, object: object)
-        }
+    @inlinable
+    func notifications(named: Notification.Name, object: AnyObject? = nil) -> NotificationSequence {
+        return NotificationSequence(center: base, named: named, object: object)
     }
     
 }
@@ -28,7 +26,7 @@ extension TetraExtension where Base: NotificationCenter {
 public final class NotificationSequence: AsyncTypedSequence, Sendable {
     
     public typealias AsyncIterator = Iterator
-    
+    public typealias Failure = Never
     
     public func makeAsyncIterator() -> Iterator {
         Iterator(parent: self)
@@ -86,13 +84,7 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
                 }
                 return captured
             }
-            // just to suppress sendable warning
-            // it is unsafe to do this thing, since NotificationCenter broadcast and share Notifiaction among listeners, but for now there is no way to handle this clearly.
-            @inline(__always)
-            func resume(_ noti: sending Notification) {
-                continuation?.resume(returning: noti)
-            }
-            resume(noti2)
+            continuation?.resume(returning: noti2)
         }
         lock.withLockUnchecked{
             $0.observer = observer
@@ -120,7 +112,7 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
     }
     
     func next(isolation: isolated (any Actor)?) async -> Notification? {
-        await withUnsafeContinuation(isolation: isolation) { continuation in
+        await withUnsafeContinuation { continuation in
             let (notification, isCancelled) = lock.withLockUnchecked { state in
                 if !state.buffer.isEmpty {
                     return (state.buffer.removeFirst() as Notification?, false)

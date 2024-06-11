@@ -9,7 +9,7 @@
 //
 
 import Foundation
-import SwiftUI
+@preconcurrency import SwiftUI
 
 @available(watchOS, deprecated: 8.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(macOS, deprecated: 12.0, message: "use Binding<MutableCollection> itself as Collection")
@@ -29,7 +29,7 @@ public extension Binding where Value: MutableCollection {
 @available(macCatalyst, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(tvOS, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(iOS, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
-public struct BindingCollection<T:MutableCollection>: Collection {
+public struct BindingCollection<T:MutableCollection>: Collection, Sendable {
     
     @usableFromInline
     @Binding var collection:T
@@ -43,11 +43,13 @@ public struct BindingCollection<T:MutableCollection>: Collection {
         if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, macOS 12.0, watchOS 8.0, *) {
             return binding[position]
         } else {
+            nonisolated(unsafe)
+            let index = consume position
             return .init {
-                binding.wrappedValue[position]
+                binding.wrappedValue[index]
             } set: { newValue, transaction in
                 withTransaction(transaction) {
-                    binding.wrappedValue[position] = newValue
+                    binding.wrappedValue[index] = newValue
                 }
             }
 

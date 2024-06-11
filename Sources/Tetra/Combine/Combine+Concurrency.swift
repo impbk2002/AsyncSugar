@@ -19,12 +19,8 @@ public extension Publisher {
 public extension TetraExtension where Base: Publisher {
     
     @inlinable
-    var values: some AsyncTypedSequence<Base.Output,Base.Failure> {
-        if #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macCatalyst 15.0, macOS 12.0, *) {
-            return base.values
-        } else {
-            return CompatAsyncThrowingPublisher(publisher: base)
-        }
+    var values: CompatAsyncThrowingPublisher<Base> {
+        CompatAsyncThrowingPublisher(publisher: base)
     }
     
 }
@@ -51,13 +47,12 @@ public extension Publisher {
     
 }
 
-@available(macOS 9999, *)
 internal extension Publisher {
     
     func asyncFlatMap<Segment:AsyncSequence, Err:Error>(
         maxTasks: Subscribers.Demand = .unlimited,
         transform: @escaping @Sendable @isolated(any) (Output) async throws(Err) -> Segment
-    ) -> AsyncFlatMap<Self, Segment, Err> where Output:Sendable {
+    ) -> AsyncFlatMap<Self, Segment, Err, any Error> where Output:Sendable {
         return AsyncFlatMap(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     

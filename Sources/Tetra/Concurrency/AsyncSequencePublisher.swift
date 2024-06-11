@@ -20,22 +20,27 @@ public extension AsyncSequence where Self:Sendable {
 public extension TetraExtension where Base: AsyncSequence & Sendable {
     
     @inlinable
-    var publisher:AsyncSequencePublisher<Base> {
-        .init(base: base)
+    var publisher:AsyncSequencePublisher<Base, any Error> {
+        .init(legacy: base)
     }
     
 }
 
-public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher {
+public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable, Failure:Error>: Publisher {
 
     public typealias Output = Base.Element
-    public typealias Failure = Base.Failure
     
     public var base:Base
     
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
     @inlinable
-    public init(base: Base) {
+    public init(base: Base) where Base.Failure == Failure {
         self.base = base
+    }
+    
+    @inlinable
+    public init(legacy: Base) where Failure == any Error {
+        self.base = legacy
     }
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.Element == S.Input {
@@ -48,7 +53,9 @@ public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher 
     
 }
 
+
 extension AsyncSequencePublisher: Sendable where Base: Sendable, Base.Element: Sendable {}
+
 
 extension AsyncSequencePublisher {
     
@@ -137,13 +144,28 @@ extension AsyncSequencePublisher {
                 for await var pending in demandSource.stream {
                     while pending > .none {
                         pending -= 1
-                        guard let result = await wrapToResult(nil, &iterator) else {
+                        let result:Result<Output,any Error>?
+                        do {
+                            let value = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
+                                try await iterator.next(isolation: #isolation)
+                            } else {
+                                try await iterator.next()
+                            }
+                            if let value {
+                                result = .success(value)
+                            } else {
+                                result = nil
+                            }
+                        } catch {
+                            result = .failure(error)
+                        }
+                        guard let result else {
                             send(completion: .finished)
                             return
                         }
                         switch result {
                         case .failure(let error):
-                            send(completion: .failure(error))
+                            send(completion: .failure(error as! Failure))
                             return
                         case .success(let value):
                             if let newDemand = send(value) {

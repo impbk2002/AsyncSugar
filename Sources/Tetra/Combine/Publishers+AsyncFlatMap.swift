@@ -8,10 +8,11 @@
 import Foundation
 @preconcurrency import Combine
 
-struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable {
+
+struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error, SegmentFail:Error>: Publisher where Upstream.Output:Sendable {
     
     typealias Output = Segment.Element
-    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.Failure>
+    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, SegmentFail>
     typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> Segment
     let maxTasks:Subscribers.Demand
     let upstream:Upstream
@@ -24,15 +25,29 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Erro
         upstream.subscribe(processor)
     }
     
+    @usableFromInline
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
     init(
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
         transform: @escaping @isolated(any) Transform
-    ) {
+    ) where Segment.Failure == SegmentFail {
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
     }
+    
+    @usableFromInline
+    init(
+        maxTasks: Subscribers.Demand,
+        upstream: Upstream,
+        transform: @escaping @isolated(any) Transform
+    ) where SegmentFail == any Error {
+        self.maxTasks = maxTasks
+        self.upstream = upstream
+        self.transform = transform
+    }
+    
     
 }
 
@@ -100,10 +115,17 @@ extension AsyncFlatMap {
                 } else {
                     let void:Void? = try? await withThrowingTaskGroup(of: Void.self) { group in
                         defer { terminateStream() }
+                        /*
+                         this is very unsafe operation, and there is no way to prove race problem to compiler for now.
+                         
+                         But at least version before `DiscardingTaskGroup` exist, this implementation is safe from race problem.
+                         
+                         Because polling add queueing taskGroup is implemented in Busy waiting atomic alogrithnm.
+                         */
                         nonisolated(unsafe)
-                        let unsafe = group.makeAsyncIterator()
+                        let unsafe = Suppress(value: group.makeAsyncIterator())
                         async let subTask:() = {
-                            var iterator = unsafe
+                            var iterator = unsafe.value
                             while let _ = try await iterator.next() {
                                 
                             }
@@ -284,7 +306,21 @@ extension AsyncFlatMap {
         private func processNextSegment(
             iterator: inout Segment.AsyncIterator
         ) async throws(CancellationError) -> Bool {
-            let nextResult = await wrapToResult(nil, &iterator)
+            let nextResult:Result<Down.Input, any Error>?
+            do {
+                let value = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
+                    try await iterator.next(isolation: #isolation)
+                } else {
+                    try await iterator.next()
+                }
+                if let value {
+                    nextResult = .success(value)
+                } else {
+                    nextResult = nil
+                }
+            } catch {
+                nextResult = .failure(error)
+            }
             switch nextResult {
             case .none:
                 //finished
@@ -310,7 +346,7 @@ extension AsyncFlatMap {
                 }
                 return false
             case .failure(let error):
-                send(completion: .failure(.segment(error)))
+                send(completion: .failure(.segment(error as! SegmentFail)))
                 throw CancellationError()
             case .success(let value):
                 try send(value)

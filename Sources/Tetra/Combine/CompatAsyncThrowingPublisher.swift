@@ -12,7 +12,7 @@ import Foundation
 public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
 
     public typealias AsyncIterator = Iterator
-    
+    public typealias Failure = Iterator.Failure
     public var publisher:P
     
     @inlinable

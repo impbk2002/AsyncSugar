@@ -190,7 +190,13 @@ final class AsyncFlatMapTests: XCTestCase {
                     $0.finish()
                 }
             }.mapError{
-                $0.unwrap()
+                switch $0 {
+                case .transform(let error):
+                    return error
+                case .segment(let error):
+                    XCTFail("should not throw during segment")
+                    return error
+                }
             }.sink {
                 switch $0 {
                 case .finished:
@@ -221,7 +227,10 @@ final class AsyncFlatMapTests: XCTestCase {
                 }
             }
             .mapError{
-                $0.unwrap()
+                switch $0 {
+                case .segment(let error):
+                    return error
+                }
             }
             .sink {
                 switch $0 {
