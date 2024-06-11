@@ -23,7 +23,7 @@ extension TetraExtension where Base: NotificationCenter {
 
 
 
-public final class NotificationSequence: AsyncTypedSequence, Sendable {
+public final class NotificationSequence: AsyncSequence, Sendable {
     
     public typealias AsyncIterator = Iterator
     public typealias Failure = Never
@@ -35,7 +35,7 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
     let center: NotificationCenter
     private let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
 
-    public struct Iterator: AsyncIteratorProtocol {
+    public struct Iterator: TypedAsyncIteratorProtocol {
         public typealias Element = Notification
         public typealias Failure = Never
         
@@ -45,6 +45,7 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
             await next(isolation: nil)
         }
         
+        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
         public func next(isolation actor: isolated (any Actor)?) async throws(Never) -> Notification? {
             //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(
@@ -69,7 +70,6 @@ public final class NotificationSequence: AsyncTypedSequence, Sendable {
         named name: Notification.Name,
         object: AnyObject? = nil
     ) {
-        
         self.center = center
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
             nonisolated(unsafe)

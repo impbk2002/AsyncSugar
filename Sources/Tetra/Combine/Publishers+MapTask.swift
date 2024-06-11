@@ -33,17 +33,17 @@ import Foundation
  ```
  
  */
-public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+public struct MapTask<Upstream:Publisher, Output>: Publisher where Upstream.Output:Sendable {
 
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
 
     public let upstream:Upstream
-    public var transform:@Sendable @isolated(any) (Upstream.Output) async -> Result<Output,Failure>
+    public var transform:@Sendable @isolated(any) (Upstream.Output) async -> sending Result<Output,Failure>
 
     public init(
         upstream: Upstream,
-        transform: @escaping @Sendable @isolated(any) (Upstream.Output) async -> Output
+        transform: @escaping @Sendable @isolated(any) (Upstream.Output) async -> sending Output
     ) {
         self.upstream = upstream
         self.transform = {
@@ -53,7 +53,7 @@ public struct MapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upst
     
     public init(
         upstream: Upstream,
-        handler: @escaping @Sendable @isolated(any) (Upstream.Output) async -> Result<Output,Failure>
+        handler: @escaping @Sendable @isolated(any) (Upstream.Output) async -> sending Result<Output,Failure>
     ) {
         self.upstream = upstream
         self.transform = handler

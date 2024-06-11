@@ -28,18 +28,25 @@ public extension TetraExtension where Base: Publisher {
 public extension Publisher {
     
     @inlinable
-    func mapTask<T:Sendable>(transform: @escaping @isolated(any) @Sendable (Output) async -> T) -> MapTask<Self,T> where Output:Sendable {
+    func mapTask<T>(
+        transform: @escaping @isolated(any) @Sendable (Output) async -> sending T
+    ) -> some Publisher<T, Failure> where Output:Sendable {
         MapTask(upstream: self, transform: transform)
     }
     
     @inlinable
-    func tryMapTask<T:Sendable>(transform: @escaping @isolated(any) @Sendable (Output) async throws -> T) -> TryMapTask<Self,T> where Output:Sendable {
+    func tryMapTask<T>(
+        transform: @escaping @isolated(any) @Sendable (Output) async throws -> sending T
+    ) -> some Publisher<T,any Error> where Output:Sendable {
         TryMapTask(upstream: self, transform: transform)
     }
     
     @_spi(Experimental)
     @inlinable
-    func multiMapTask<T:Sendable>(maxTasks: Subscribers.Demand = .max(1), transform: @escaping @Sendable @isolated(any) (Output) async throws(Self.Failure) -> T) -> MultiMapTask<Self,T> where Output: Sendable {
+    func multiMapTask<T>(
+        maxTasks: Subscribers.Demand = .max(1),
+        transform: @escaping @Sendable @isolated(any) (Output) async throws(Failure) -> sending T
+    ) -> some Publisher<T,Failure> where Output: Sendable {
         MultiMapTask(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     
@@ -51,8 +58,8 @@ internal extension Publisher {
     
     func asyncFlatMap<Segment:AsyncSequence, Err:Error>(
         maxTasks: Subscribers.Demand = .unlimited,
-        transform: @escaping @Sendable @isolated(any) (Output) async throws(Err) -> Segment
-    ) -> AsyncFlatMap<Self, Segment, Err, any Error> where Output:Sendable {
+        transform: @escaping @Sendable @isolated(any) (Output) async throws(Err) -> sending Segment
+    ) -> AsyncFlatMap<Self,WrappedAsyncSequence<Segment>, Err> where Output:Sendable {
         return AsyncFlatMap(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     

@@ -22,7 +22,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             source.forEach{ continuation.yield($0) }
             continuation.finish()
         }
-        let cancellable = AsyncSequencePublisher(legacy: stream)
+        let cancellable = AsyncSequencePublisher(base: stream)
             .catch{ _ in
                 XCTFail()
                 return Empty<Int, Never>()
@@ -59,7 +59,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             }
             return value
         }
-        let pub = AsyncSequencePublisher(legacy: asyncSequence)
+        let pub = AsyncSequencePublisher(base: asyncSequence)
             .handleEvents(
                 receiveCancel: { expect.fulfill() }
             )
@@ -88,7 +88,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             }
             return value
         }
-        let cancellable = AsyncSequencePublisher(legacy: asyncSequence)
+        let cancellable = AsyncSequencePublisher(base: asyncSequence)
             .mapError{
                 $0 as! CancellationError
             }

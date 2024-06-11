@@ -9,10 +9,11 @@
 import Foundation
 @preconcurrency import Combine
 
-public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
+public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncSequence {
 
     public typealias AsyncIterator = Iterator
-    public typealias Failure = Iterator.Failure
+    public typealias Failure = AsyncIterator.Failure
+    
     public var publisher:P
     
     @inlinable
@@ -20,7 +21,7 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         Iterator(source: publisher)
     }
     
-    public struct Iterator: AsyncIteratorProtocol {
+    public struct Iterator: TypedAsyncIteratorProtocol {
         
         public typealias Element = P.Output
         public typealias Failure = P.Failure
@@ -29,6 +30,7 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         @usableFromInline
         internal let reference:AnyCancellable
         
+        @_implements(TypedAsyncIteratorProtocol, tetraNext(isolation:))
         @inlinable
         public mutating func next(isolation actor: isolated (any Actor)?) async throws(P.Failure) -> P.Output? {
             let result = await withTaskCancellationHandler { [inner] in

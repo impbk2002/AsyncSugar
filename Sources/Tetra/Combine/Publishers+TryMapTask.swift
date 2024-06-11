@@ -30,17 +30,17 @@ import _Concurrency
      
 ```
  */
-public struct TryMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+public struct TryMapTask<Upstream:Publisher, Output>: Publisher where Upstream.Output:Sendable {
 
     public typealias Output = Output
     public typealias Failure = any Error
 
     public let upstream:Upstream
-    public var transform: @isolated(any) @Sendable (Upstream.Output) async throws -> Output
+    public var transform: @isolated(any) @Sendable (Upstream.Output) async throws -> sending Output
 
     public init(
         upstream: Upstream,
-        transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws -> Output
+        transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws -> sending Output
     ) {
         self.upstream = upstream
         self.transform = transform

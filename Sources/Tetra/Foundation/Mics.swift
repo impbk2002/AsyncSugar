@@ -88,21 +88,29 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
     }
 }
 
-@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
 @inline(__always)
 @usableFromInline
 internal
-func wrapToResult<Base: AsyncIteratorProtocol>(
+func wrapToResult<Base: TypedAsyncIteratorProtocol>(
     _ actor: isolated (any Actor)?,
     _ iterator: inout Base
-) async -> Result<Base.Element,Base.Failure>? {
+) async -> sending Result<Base.Element,Base.TetraFailure>? {
     do {
-        let value = try await iterator.next(isolation: actor)
-        if let value {
+        if let value = try await iterator.tetraNext(isolation: actor) {
             return .success(value)
-        } else {
-            return nil
         }
+        return nil
+//        if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
+//            let value = try await iterator.next(isolation: actor)
+//            if let value {
+//                return .success(value)
+//            } else {
+//                return nil
+//            }
+//        } else {
+//            let result = try await iterator.next()
+//            return result
+//        }
     } catch {
         return .failure(error)
     }
@@ -111,7 +119,7 @@ func wrapToResult<Base: AsyncIteratorProtocol>(
 
 @inline(__always)
 @usableFromInline
-internal func wrapToResult<T,Failure:Error, U>(_ value:T, _ transform: (T) async throws(Failure) -> U) async -> Result<U,Failure> {
+internal func wrapToResult<T,Failure:Error, U>(_ value:T, _ transform: (T) async throws(Failure) -> U) async -> sending Result<U,Failure> {
     do {
         let success = try await transform(value)
         return .success(success)

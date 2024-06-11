@@ -17,14 +17,14 @@ import Foundation
     precondition `maxTasks` must be none zero value
  */
 @_spi(Experimental)
-public struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream.Output:Sendable {
     
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
 
     public let maxTasks:Subscribers.Demand
     public let upstream:Upstream
-    public let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
+    public let transform:@Sendable (Upstream.Output) async throws(Failure) -> sending Output
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)

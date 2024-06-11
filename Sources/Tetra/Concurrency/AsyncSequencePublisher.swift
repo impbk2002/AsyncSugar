@@ -20,27 +20,34 @@ public extension AsyncSequence where Self:Sendable {
 public extension TetraExtension where Base: AsyncSequence & Sendable {
     
     @inlinable
-    var publisher:AsyncSequencePublisher<Base, any Error> {
-        .init(legacy: base)
+    var publisher:some Publisher<Base.Element, any Error> {
+        AsyncSequencePublisher(base: base)
     }
     
 }
 
-public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable, Failure:Error>: Publisher {
 
+
+public struct AsyncSequencePublisher<Base: AsyncSequence & Sendable>: Publisher where Base.AsyncIterator: TypedAsyncIteratorProtocol {
+    
     public typealias Output = Base.Element
+    public typealias Failure = Base.AsyncIterator.TetraFailure
     
     public var base:Base
     
-    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
-    @inlinable
-    public init(base: Base) where Base.Failure == Failure {
+    public init(base: Base) {
         self.base = base
     }
     
-    @inlinable
-    public init(legacy: Base) where Failure == any Error {
-        self.base = legacy
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+    public init<Source:AsyncSequence & Sendable>(base:Source) where WrappedAsyncSequenceV2<Source> == Base {
+        let source = WrappedAsyncSequenceV2(base: base)
+        self.base = source
+    }
+    
+    public init<Source:AsyncSequence & Sendable>(base: Source) where Failure == any Error, WrappedAsyncSequence<Source> == Base {
+        let source = WrappedAsyncSequence(base: base)
+        self.base = source
     }
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.Element == S.Input {
@@ -144,28 +151,14 @@ extension AsyncSequencePublisher {
                 for await var pending in demandSource.stream {
                     while pending > .none {
                         pending -= 1
-                        let result:Result<Output,any Error>?
-                        do {
-                            let value = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
-                                try await iterator.next(isolation: #isolation)
-                            } else {
-                                try await iterator.next()
-                            }
-                            if let value {
-                                result = .success(value)
-                            } else {
-                                result = nil
-                            }
-                        } catch {
-                            result = .failure(error)
-                        }
+                        let result = await wrapToResult(#isolation, &iterator)
                         guard let result else {
                             send(completion: .finished)
                             return
                         }
                         switch result {
                         case .failure(let error):
-                            send(completion: .failure(error as! Failure))
+                            send(completion: .failure(error))
                             return
                         case .success(let value):
                             if let newDemand = send(value) {

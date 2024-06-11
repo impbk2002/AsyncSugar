@@ -9,16 +9,19 @@ import Foundation
 @preconcurrency import Combine
 
 
-struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error, SegmentFail:Error>: Publisher where Upstream.Output:Sendable {
+struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable, Segment.AsyncIterator: TypedAsyncIteratorProtocol {
     
     typealias Output = Segment.Element
-    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, SegmentFail>
-    typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> Segment
+    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.AsyncIterator.TetraFailure>
+    typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> sending Segment
     let maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
     
     func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Segment.Element == S.Input {
+        if #available(macOS 15.0, *) {
+            assert(Segment.Failure.self ==  Segment.AsyncIterator.TetraFailure.self, "assert")
+        }
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
         let task = Task(operation: processor.run)
         processor.resumeCondition(task)
@@ -26,28 +29,45 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence, TransformFail:Erro
     }
     
     @usableFromInline
-    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
     init(
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
         transform: @escaping @isolated(any) Transform
-    ) where Segment.Failure == SegmentFail {
+    ) {
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
     }
     
     @usableFromInline
-    init(
+    init<Source>(
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        transform: @escaping @isolated(any) Transform
-    ) where SegmentFail == any Error {
+        transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
+    ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source>, Segment.AsyncIterator.TetraFailure == any Error {
+        let block:Transform = {
+            return .init(base: try await transform($0))
+        }
         self.maxTasks = maxTasks
         self.upstream = upstream
-        self.transform = transform
+        self.transform = block
     }
-    
+
+//    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+//    @usableFromInline
+//    init<Source>(
+//        maxTasks: Subscribers.Demand,
+//        upstream: Upstream,
+//        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
+//    ) where Source: AsyncSequence, Segment == WrappedAsyncSequenceV2<Source> {
+//        let block:Transform = {
+//            return .init(base: try await typedTransform($0))
+//        }
+//        self.maxTasks = maxTasks
+//        self.upstream = upstream
+//        self.transform = block
+//    }
+
     
 }
 
@@ -56,7 +76,7 @@ extension AsyncFlatMap {
     struct Inner<Down:Subscriber>: Subscriber, Sendable, Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible
     where Segment.Element == Down.Input, Down.Failure == AsyncFlatMap.Failure {
         
-        typealias Transformer = @Sendable (Upstream.Output) async throws(TransformFail) -> Segment
+        typealias Transformer = @Sendable (Upstream.Output) async throws(TransformFail) -> sending Segment
         typealias Input = Upstream.Output
         typealias Failure = Upstream.Failure
         
@@ -271,7 +291,7 @@ extension AsyncFlatMap {
             valueSource.continuation.finish()
         }
         
-        private func makeSegment(_ input:Upstream.Output) async throws(CancellationError) -> Segment {
+        private func makeSegment(_ input:Upstream.Output) async throws(CancellationError) -> sending Segment {
             let result:Result<Segment,TransformFail>
             do {
                 let seg = try await transform(input)
@@ -306,21 +326,7 @@ extension AsyncFlatMap {
         private func processNextSegment(
             iterator: inout Segment.AsyncIterator
         ) async throws(CancellationError) -> Bool {
-            let nextResult:Result<Down.Input, any Error>?
-            do {
-                let value = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
-                    try await iterator.next(isolation: #isolation)
-                } else {
-                    try await iterator.next()
-                }
-                if let value {
-                    nextResult = .success(value)
-                } else {
-                    nextResult = nil
-                }
-            } catch {
-                nextResult = .failure(error)
-            }
+            let nextResult = await wrapToResult(#isolation, &iterator)
             switch nextResult {
             case .none:
                 //finished
@@ -346,7 +352,7 @@ extension AsyncFlatMap {
                 }
                 return false
             case .failure(let error):
-                send(completion: .failure(.segment(error as! SegmentFail)))
+                send(completion: .failure(.segment(error)))
                 throw CancellationError()
             case .success(let value):
                 try send(value)
