@@ -79,7 +79,7 @@ extension MultiMapTask {
         private func localTask(
             subscription: any Subscription,
             group: inout some CompatThrowingDiscardingTaskGroup
-        ) async {
+        ) async throws {
             group.addTask(priority: nil) {
                 for await demand in demandSource.stream {
                     let nextDemand = receive(demand: demand)
@@ -93,7 +93,7 @@ extension MultiMapTask {
                 switch upstreamValue {
                 case .failure(let failure):
                     send(completion: .failure(failure), cancel: false)
-                    break
+                    throw CancellationError()
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
                         switch await transform(success) {
@@ -220,7 +220,7 @@ extension MultiMapTask {
                 if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
                     try? await withThrowingDiscardingTaskGroup(returning: Void.self) { group in
                         defer { terminateStream() }
-                        await localTask(
+                        try await localTask(
                             subscription: subscription,
                             group: &group
                         )
@@ -228,18 +228,37 @@ extension MultiMapTask {
                 } else {
                     try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
                         defer { terminateStream() }
+                        let lock = createCheckedStateLock(checkedState: DiscardingTaskState.waiting)
+                        group.addTask {
+                            // keep at least one child task alive
+                            try await withUnsafeThrowingContinuation{ continuation in
+                                lock.withLock{
+                                    $0.transition(.suspend(continuation))
+                                }?.run()
+                            }
+                        }
                         var iterator = group.makeAsyncIterator()
-                        let stream = AsyncThrowingStream(unfolding: { try await iterator.next() })
+                        let stream = AsyncThrowingStream(unfolding: { return try await iterator.next() })
                         async let subTask:() = {
                             for try await _ in stream {
                                 
                             }
                         }()
-                        await localTask(
-                            subscription: subscription,
-                            group: &group
-                        )
-                        try await subTask
+                        do {
+                            try await localTask(
+                                subscription: subscription,
+                                group: &group
+                            )
+                            lock.withLock{
+                                $0.transition(.finish)
+                            }?.run()
+                            try await subTask
+                        } catch {
+                            lock.withLock{
+                                $0.transition(.cancel)
+                            }?.run()
+                            throw error
+                        }
                     }
                 }
                 send(completion: .finished)
