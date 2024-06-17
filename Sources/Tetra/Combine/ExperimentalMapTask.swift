@@ -24,11 +24,16 @@ public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream
 
     public let maxTasks:Subscribers.Demand
     public let upstream:Upstream
-    public let transform:@Sendable (Upstream.Output) async throws(Failure) -> sending Output
+    public let transform: @isolated(any) @Sendable (Upstream.Output) async throws(Failure) -> sending Output
+    public let taskExecutor: (any Executor)?
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
-        let task = Task(operation: processor.run)
+        let task = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *), let executor = taskExecutor as? (any TaskExecutor) {
+            Task(executorPreference: executor, operation: processor.run)
+        } else {
+            Task(operation: processor.run)
+        }
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
@@ -43,6 +48,21 @@ public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
+        self.taskExecutor = nil
+    }
+    
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+    public init(
+        maxTasks: Subscribers.Demand = .max(1),
+        executor:(any TaskExecutor)? = nil,
+        upstream: Upstream,
+        transform: @Sendable @escaping @isolated(any) (Upstream.Output) async throws(Failure) -> Output
+    ) {
+        precondition(maxTasks != .none, "maxTasks can not be zero")
+        self.maxTasks = maxTasks
+        self.upstream = upstream
+        self.transform = transform
+        self.taskExecutor = executor
     }
     
 }
@@ -58,6 +78,7 @@ extension MultiMapTask {
         var condition = TaskValueContinuation.waiting
     }
     
+    // this can run serially or in parallel by using demand config, so use adding actor isolation seems quite odd here
     struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
         private let maxTasks:Subscribers.Demand
@@ -79,11 +100,11 @@ extension MultiMapTask {
             }
         }
         
-        private func localTask(
+        internal func localTask(
+            isolation actor: isolated (any Actor)? = #isolation,
             group: inout some CompatThrowingDiscardingTaskGroup
-        ) async {
-            var iterator = valueSource.stream.makeAsyncIterator()
-            while let upstreamValue = await iterator.next() {
+        ) async throws {
+            for await upstreamValue in valueSource.stream {
                 switch upstreamValue {
                 case .failure(let failure):
                     send(completion: .failure(failure), cancel: false)
@@ -208,33 +229,12 @@ extension MultiMapTask {
                 if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
                     try? await withThrowingDiscardingTaskGroup(returning: Void.self) { group in
                         defer { terminateStream() }
-                        await localTask(
+                        try await localTask(
                             group: &group
                         )
                     }
                 } else {
-                    try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
-                        defer { terminateStream() }
-                        /*
-                         this is very unsafe operation, and there is no way to prove race problem to compiler for now.
-                         
-                         But at least version before `DiscardingTaskGroup` exist, this implementation is safe from race problem.
-                         
-                         Because polling add queueing taskGroup is implemented in Busy waiting atomic alogrithnm.
-                         */
-                        nonisolated(unsafe)
-                        let unsafe = Suppress(value: group.makeAsyncIterator())
-                        async let subTask:() = {
-                            var iterator = unsafe.value
-                            while let _ = try await iterator.next() {
-                                
-                            }
-                        }()
-                        await localTask(
-                            group: &group
-                        )
-                        try await subTask
-                    }
+                    try? await wrapForBackDeploy(isolation: SafetyRegion())
                 }
                 send(completion: .finished)
             } onCancel: {
@@ -242,7 +242,19 @@ extension MultiMapTask {
             }
         }
         
+        func wrapForBackDeploy(
+            isolation actor: isolated (some Actor)
+        ) async throws {
+            try await withThrowingTaskGroup(of: Void.self) {
+                defer { terminateStream() }
+                try await $0.simulateDiscarding(isolation: actor) { isolation, group in
+                    try await localTask(isolation: isolation, group: &group)
+                }
+            }
+        }
+        
     }
+    
     
 }
 
