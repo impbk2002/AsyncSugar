@@ -87,21 +87,23 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
         body: (isolated any Actor, inout Self) async throws -> Void
     ) async throws {
         addTask {
-            // keep at least one child task alive
+            /// keep at least one child task alive
+            /// so that subTask won't return
             await actor.hold()
         }
+        /// drain all the finished or failed Task
         async let subTask:Void = {
             while let _ = try await next(isolation: actor) {
             }
         }()
+        // wrap with do block so that `defer` pops before waiting subTask
         do {
+            /// release suspending Task
+            defer { actor.markDone() }
+            /// wrap the mutable TaskGroup with actor isolation
             try await body(actor, &self)
-            actor.markDone()
-            try await subTask
-        } catch {
-            actor.markDone()
-            throw error
         }
+        try await subTask
     }
     
 }
