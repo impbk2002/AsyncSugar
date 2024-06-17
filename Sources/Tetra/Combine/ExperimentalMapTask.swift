@@ -87,7 +87,7 @@ extension MultiMapTask {
                 switch upstreamValue {
                 case .failure(let failure):
                     send(completion: .failure(failure), cancel: false)
-                    break
+                    throw CancellationError()
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
                         let result = await wrapToResult(success, transform)
