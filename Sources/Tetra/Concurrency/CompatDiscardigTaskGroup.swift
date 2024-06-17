@@ -41,9 +41,35 @@ extension ThrowingTaskGroup: CompatThrowingDiscardingTaskGroup where ChildTaskRe
 @usableFromInline
 actor SafetyRegion {
     
+    private var isFinished = false
+    private var continuation: UnsafeContinuation<Void,Never>? = nil
+    
     @usableFromInline
     init() {
         
+    }
+    
+    @usableFromInline
+    func markDone() {
+        guard !isFinished else { return }
+        isFinished = true
+        continuation?.resume()
+        continuation = nil
+    }
+    
+    @usableFromInline
+    func hold() async {
+        await withUnsafeContinuation {
+            if isFinished {
+                $0.resume()
+            } else {
+                if let old = self.continuation {
+                    assertionFailure("received suspend more than once!")
+                    old.resume()
+                }
+                self.continuation = $0
+            }
+        }
     }
     
 }
@@ -54,36 +80,26 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
     /// work around for simulating Discarding TaskGroup
     ///
     ///  TaskGroup is protected by the actor isolation
-    ///  - warning: always call TaskGroup api while holding isolation
+    ///  - important: always call TaskGroup api while holding isolation
     @usableFromInline
     internal mutating func simulateDiscarding(
-        isolation actor: isolated (any Actor),
+        isolation actor: isolated (SafetyRegion),
         body: (isolated any Actor, inout Self) async throws -> Void
     ) async throws {
-        let lock = createCheckedStateLock(checkedState: DiscardingTaskState.waiting)
         addTask {
             // keep at least one child task alive
-            try await withUnsafeThrowingContinuation { continuation in
-                lock.withLock{
-                    $0.transition(.suspend(continuation))
-                }?.run()
-            }
+            await actor.hold()
         }
         async let subTask:Void = {
             while let _ = try await next(isolation: actor) {
-
             }
         }()
         do {
             try await body(actor, &self)
-            lock.withLock{
-                $0.transition(.finish)
-            }?.run()
+            actor.markDone()
             try await subTask
         } catch {
-            lock.withLock{
-                $0.transition(.cancel)
-            }?.run()
+            actor.markDone()
             throw error
         }
     }

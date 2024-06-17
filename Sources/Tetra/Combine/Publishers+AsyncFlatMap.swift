@@ -130,26 +130,7 @@ extension AsyncFlatMap {
                     
                     isCancelled = void == nil
                 } else {
-                    let void:Void? = try? await withThrowingTaskGroup(of: Void.self) { group in
-                        defer { terminateStream() }
-                        /*
-                         this is very unsafe operation, and there is no way to prove race problem to compiler for now.
-                         
-                         But at least version before `DiscardingTaskGroup` exist, this implementation is safe from race problem.
-                         
-                         Because polling add queueing taskGroup is implemented in Busy waiting atomic alogrithnm.
-                         */
-                        nonisolated(unsafe)
-                        let unsafe = Suppress(value: group.makeAsyncIterator())
-                        async let subTask:() = {
-                            var iterator = unsafe.value
-                            while let _ = try await iterator.next() {
-                                
-                            }
-                        }()
-                        try await localTask(group: &group)
-                        try await subTask
-                    }
+                    let void:Void? = try? await wrapForBackDeploy(isolation: SafetyRegion())
                     isCancelled = void == nil
                 }
                 if !isCancelled {
@@ -357,7 +338,19 @@ extension AsyncFlatMap {
             return true
         }
         
+        func wrapForBackDeploy(
+            isolation actor: isolated SafetyRegion
+        ) async throws {
+            try await withThrowingTaskGroup(of: Void.self) {
+                defer { terminateStream() }
+                try await $0.simulateDiscarding(isolation: actor) { isolation, group in
+                    try await localTask(isolation: isolation, group: &group)
+                }
+            }
+        }
+        
         private func localTask(
+            isolation actor: isolated (any Actor)? = #isolation,
             group: inout some CompatThrowingDiscardingTaskGroup
         ) async throws {
             for await result in valueSource.stream {

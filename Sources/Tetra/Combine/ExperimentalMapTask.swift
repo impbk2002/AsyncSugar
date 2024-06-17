@@ -243,7 +243,7 @@ extension MultiMapTask {
         }
         
         func wrapForBackDeploy(
-            isolation actor: isolated (some Actor)
+            isolation actor: isolated SafetyRegion
         ) async throws {
             try await withThrowingTaskGroup(of: Void.self) {
                 defer { terminateStream() }
