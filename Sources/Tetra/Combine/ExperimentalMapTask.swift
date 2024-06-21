@@ -66,6 +66,7 @@ extension MultiMapTask {
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
         private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
         private let downStreamLock = NSRecursiveLock()
+        private let outerLock = NSRecursiveLock()
         let combineIdentifier = CombineIdentifier()
         
         init(maxTasks:Subscribers.Demand, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
@@ -84,7 +85,9 @@ extension MultiMapTask {
                 for await demand in demandSource.stream {
                     let nextDemand = receive(demand: demand)
                     if nextDemand > .none {
-                        subscription.request(nextDemand)
+                        outerLock.withLock {
+                            subscription.request(nextDemand)
+                        }
                     }
                 }
             }
@@ -103,7 +106,9 @@ extension MultiMapTask {
                         case .success(let value):
                             if let demand = send(value) {
                                 if demand > .none {
-                                    subscription.request(demand)
+                                    outerLock.withLock {
+                                        subscription.request(demand)
+                                    }
                                 }
                             } else {
                                 throw CancellationError()
@@ -269,7 +274,9 @@ extension MultiMapTask {
                 }
                 send(completion: .finished)
             } onCancel: {
-                subscription.cancel()
+                outerLock.withLock {
+                    subscription.cancel()
+                }
                 send(completion: nil, cancel: false)
             }
         }

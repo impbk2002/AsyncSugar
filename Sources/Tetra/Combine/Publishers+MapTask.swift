@@ -81,6 +81,7 @@ extension MapTask {
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
         let combineIdentifier = CombineIdentifier()
+        private let subscriptionLock = NSRecursiveLock()
         
         init(
             subscriber:S,
@@ -177,7 +178,9 @@ extension MapTask {
                 for await var demand in demandSource.stream {
                     while demand > .none {
                         demand -= 1
-                        subscription.request(.max(1))
+                        subscriptionLock.withLock {
+                            subscription.request(.max(1))
+                        }
                         let upstreamResult = await iterator.next()
                         let upstreamValue:Upstream.Output
                         switch upstreamResult {
@@ -207,7 +210,9 @@ extension MapTask {
                     
                 }
             } onCancel: {
-                subscription.cancel()
+                subscriptionLock.withLock {
+                    subscription.cancel()
+                }
                 send(completion: nil)
             }
 
