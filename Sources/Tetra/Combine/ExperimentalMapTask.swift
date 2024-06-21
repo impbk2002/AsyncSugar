@@ -65,7 +65,7 @@ extension MultiMapTask {
         private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
         private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
-
+        private let downStreamLock = NSRecursiveLock()
         let combineIdentifier = CombineIdentifier()
         
         init(maxTasks:Subscribers.Demand, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
@@ -135,16 +135,22 @@ extension MultiMapTask {
                 return (old, effect)
             }
             effect?.run()
-            if let completion {
-                subscriber?.receive(completion: completion)
+            if let completion, let subscriber {
+                downStreamLock.withLock {
+                    subscriber.receive(completion: completion)
+                }
             }
         }
         
         private func send(_ value: S.Input) -> Subscribers.Demand? {
-            let newDemand = state.withLockUnchecked{
+            let subscriber = state.withLockUnchecked{
                 $0.subscriber
-            }?.receive(value)
-            guard let newDemand else { return nil }
+            }
+            guard let subscriber else { return nil }
+            
+            let newDemand = downStreamLock.withLock{
+                subscriber.receive(value)
+            }
             
             if maxTasks == .unlimited {
                 return newDemand
