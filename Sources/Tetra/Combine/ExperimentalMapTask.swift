@@ -144,8 +144,10 @@ extension MultiMapTask {
                 return (old, effect)
             }
             effect?.run()
-            if let completion {
-                subscriber?.receive(completion: completion)
+            if let completion, let subscriber {
+                downStreamLock.withLock {
+                    subscriber.receive(completion: completion)
+                }
             }
         }
         
@@ -250,6 +252,7 @@ extension MultiMapTask {
                 try await $0.simulateDiscarding(isolation: actor) { isolation, group in
                     try await localTask(isolation: isolation, group: &group)
                 }
+                send(completion: nil, cancel: false)
             }
         }
         
