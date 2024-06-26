@@ -1,5 +1,5 @@
 //
-//  error.swift
+//  AsyncPrefixWhileSequence.swift
 //
 //
 //  Created by 박병관 on 6/13/24.
@@ -87,6 +87,7 @@ extension BackPort.AsyncPrefixWhileSequence.Iterator: AsyncIteratorProtocol, Typ
     /// succeeds, this method passes along the element. Otherwise, it returns
     /// `nil`, ending the sequence. If calling the predicate closure throws an
     /// error, the sequence ends and `next()` rethrows the error.
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)
@@ -100,7 +101,7 @@ extension BackPort.AsyncPrefixWhileSequence.Iterator: AsyncIteratorProtocol, Typ
     /// `nil`, ending the sequence. If calling the predicate closure throws an
     /// error, the sequence ends and `next(isolation:)` rethrows the error.
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Base.Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Base.Element? {
         if !predicateHasFailed, let nextElement = try await baseIterator.next(isolation: actor) {
             do {
                 if try await predicate(nextElement) {

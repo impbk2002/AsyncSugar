@@ -7,8 +7,10 @@
 
 import Foundation
 @preconcurrency import Combine
+public import BackPortAsyncSequence
+internal import CriticalSection
 
-public extension AsyncSequence where Self:Sendable {
+public extension AsyncSequence  {
     
     @inlinable
     var tetra:TetraExtension<Self> {
@@ -17,44 +19,57 @@ public extension AsyncSequence where Self:Sendable {
     
 }
 
-public extension TetraExtension where Base: AsyncSequence & Sendable {
+public extension TetraExtension where Base: AsyncSequence {
     
-//    @inlinable
-//    var publisher:some Publisher<Base.Element, any Error> {
-//        AsyncSequencePublisher(base: base)
-//    }
+    @_disfavoredOverload
+    @inlinable
+    var publisher:some Publisher<Base.Element, any Error> {
+        AsyncSequencePublisher(base: LegacyTypedAsyncSequence(base: base))
+    }
+    
+}
+
+public extension TetraExtension where Base: AsyncSequence, Base.AsyncIterator: TypedAsyncIteratorProtocol {
+    
+    @inlinable
+    var publisher:some Publisher<Base.Element, Base.AsyncIterator.Err> {
+        AsyncSequencePublisher(base: base)
+    }
     
 }
 
 
-
-internal struct AsyncSequencePublisher<Base: TypedAsyncSequence & Sendable & AsyncSequence>: Publisher {
+public struct AsyncSequencePublisher<Base: AsyncSequence>: Publisher where Base.AsyncIterator: TypedAsyncIteratorProtocol {
     
     public typealias Output = Base.AsyncIterator.Element
     
-    public typealias Failure = Base.AsyncIterator.Failure
+    public typealias Failure = Base.AsyncIterator.Err
     
     public var base:Base
+    public var barrier: (any Actor)? = nil
+    public var priority: TaskPriority? = nil
     
-    public init(base: Base) {
+    @inlinable
+    public init(
+        base: Base,
+        barrier: (any Actor)? = nil,
+        priority: TaskPriority? = nil
+    ) {
         self.base = base
-    }
-    
-    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
-    public init<Source:AsyncSequence & Sendable>(base:Source) where WrappedAsyncSequenceV2<Source> == Base {
-        let source = WrappedAsyncSequenceV2(base: base)
-        self.base = source
-    }
-    
-    public init<Source:AsyncSequence & Sendable>(base: Source) where Failure == any Error, WrappedAsyncSequence<Source> == Base {
-        let source = WrappedAsyncSequence(base: base)
-        self.base = source
+        self.barrier = barrier
+        self.priority = priority
     }
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.AsyncIterator.Element == S.Input {
         let processor = Inner(subscriber: subscriber)
-        let task = Task { [base] in
-            await processor.run(base)
+        // transfer the AsyncIterator to the Task
+        // can not tell the compiler that this is safe,
+        // but this transfer is safe from data race
+        nonisolated(unsafe)
+        let unsafe = Suppress(value: base.makeAsyncIterator())
+        let task = Task(priority: priority) { [capture = consume unsafe, barrier] in
+            var iter = capture.value
+            await processor.run(barrier, &iter)
         }
         processor.resumeCondition(task)
     }
@@ -71,6 +86,9 @@ extension AsyncSequencePublisher {
         
         var subscriber:S? = nil
         var condition = TaskValueContinuation.waiting
+        var demand = Subscribers.Demand.none
+        var continuation:UnsafeContinuation<Subscribers.Demand?,Never>? = nil
+        var terminated = false
         
     }
     
@@ -80,7 +98,6 @@ extension AsyncSequencePublisher {
         
         var playgroundDescription: Any { description }
         let combineIdentifier = CombineIdentifier()
-        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
         private let state:some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
         
         init(subscriber:S) {
@@ -89,15 +106,25 @@ extension AsyncSequencePublisher {
             }
         }
         
-        
         func cancel() {
-            state.withLock{
-                return $0.condition.transition(.cancel)
-            }?.run()
+            send(completion: nil)
         }
         
         func request(_ demand: Subscribers.Demand) {
-            demandSource.continuation.yield(demand)
+            let tuple:(UnsafeContinuation<Subscribers.Demand?,Never>, Subscribers.Demand)? = state.withLock{
+                $0.demand += demand
+                let old = $0.continuation
+                $0.continuation = nil
+                if let old, $0.demand > .none {
+                    let newDemand = $0.demand
+                    $0.demand = .none
+                    return (old, newDemand)
+                } else {
+                    return .none
+                }
+            }
+            guard let (token, newDemand) = tuple else { return }
+            token.resume(returning: newDemand)
         }
         
         private func send(_ value:S.Input) -> Subscribers.Demand? {
@@ -105,14 +132,20 @@ extension AsyncSequencePublisher {
         }
         
         private func send(completion: Subscribers.Completion<S.Failure>?) {
-            let subscriber = state.withLockUnchecked{
+            let (subscriber, effect, token) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                return old
+                $0.terminated = true
+                let effect = $0.condition.transition(completion == nil ? .cancel : .finish)
+                let token = $0.continuation
+                $0.continuation = nil
+                return (old, effect, token)
             }
             if let completion {
                 subscriber?.receive(completion: completion)
             }
+            token?.resume(returning: nil)
+            effect?.run()
         }
         
         func resumeCondition(_ task:Task<Void,Never>) {
@@ -129,53 +162,62 @@ extension AsyncSequencePublisher {
             }
         }
         
-        private func clearCondition() {
-            state.withLock{
-                $0.condition.transition(.finish)
-            }?.run()
+        private func nextDemand() async -> Subscribers.Demand? {
+            await withUnsafeContinuation{ continuation in
+                let demand:Subscribers.Demand? = state.withLock{
+                    if $0.demand > .none {
+                        let newDemand = $0.demand
+                        $0.demand = .none
+                        return newDemand
+                    } else if $0.continuation == nil {
+                        $0.continuation = continuation
+                        return Subscribers.Demand.none
+                    } else {
+                        assertionFailure("received \(#function) twice at the same time")
+                        return nil
+                    }
+                    
+                }
+                if let demand, demand > .none {
+                    continuation.resume(returning: demand)
+                }
+                if demand == nil {
+                    continuation.resume(returning: nil)
+                }
+                
+            }
         }
+
         
-        func run(_ base: Base) async {
+        func run(
+            _ actor: isolated (any Actor)? = #isolation,
+            _ iterator: inout sending Base.AsyncIterator
+        ) async {
             let token:Void? = try? await waitForCondition()
-            defer {
-                demandSource.continuation.finish()
-            }
             if token == nil {
-                withUnsafeCurrentTask { $0?.cancel() }
+                send(completion: nil)
             }
-            defer { clearCondition() }
             state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
-            var iterator = base.makeAsyncIterator()
-            await withTaskCancellationHandler {
-                for await var pending in demandSource.stream {
+            do {
+                while var pending = await nextDemand() {
                     while pending > .none {
                         pending -= 1
-                        let result = await wrapToResult(#isolation, &iterator)
-                        guard let result else {
+                        guard let value = try await iterator.next(isolation: actor)
+                        else {
                             send(completion: .finished)
                             return
                         }
-                        switch result {
-                        case .failure(let error):
-                            send(completion: .failure(error))
+                        guard let newDemand = send(value) else {
                             return
-                        case .success(let value):
-                            if let newDemand = send(value) {
-                                pending += newDemand
-                            } else {
-                                return
-                            }
                         }
+                        pending += newDemand
                     }
                 }
-                send(completion: .finished)
-            } onCancel: {
-                demandSource.continuation.finish()
-                send(completion: nil)
+            } catch {
+                send(completion: .failure(error))
             }
-
         }
         
     }

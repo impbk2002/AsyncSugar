@@ -5,9 +5,6 @@
 //  Created by 박병관 on 6/13/24.
 //
 
-
-import Foundation
-
 extension BackPort {
     
     
@@ -76,7 +73,7 @@ extension BackPort.AsyncFilterSequence.Iterator: AsyncIteratorProtocol, TypedAsy
     public typealias Failure = Base.AsyncIterator.Err
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         while !finished {
             guard let element = try await baseIterator.next(isolation: actor) else {
                 return nil
@@ -94,6 +91,7 @@ extension BackPort.AsyncFilterSequence.Iterator: AsyncIteratorProtocol, TypedAsy
         return nil
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

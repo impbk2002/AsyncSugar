@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+internal import BackPortAsyncSequence
 
 public extension Publisher {
     @inlinable
@@ -54,12 +55,20 @@ public extension Publisher {
     
 }
 
+
 internal extension Publisher {
+//    
+//    func asyncFlatMap<Segment:AsyncSequence>(
+//        maxTasks: Subscribers.Demand = .unlimited,
+//        transform: @escaping @Sendable @isolated(any) (Output) async throws(any Error) -> sending Segment
+//    ) -> AsyncFlatMap<Self,LegacyTypedAsyncSequence<Segment>> where Output:Sendable {
+//        return AsyncFlatMap(maxTasks: maxTasks, upstream: self, transform: transform)
+//    }
     
-    func asyncFlatMap<Segment:AsyncSequence, Err:Error>(
+    func asyncFlatMap<Segment:TypedAsyncSequence>(
         maxTasks: Subscribers.Demand = .unlimited,
-        transform: @escaping @Sendable @isolated(any) (Output) async throws(Err) -> sending Segment
-    ) -> AsyncFlatMap<Self,WrappedAsyncSequence<Segment>, Err> where Output:Sendable {
+        transform: @escaping @Sendable @isolated(any) (Output) async throws(Failure) -> sending Segment
+    ) -> AsyncFlatMap<Self,Segment> where Output:Sendable, Segment.Err == Failure {
         return AsyncFlatMap(maxTasks: maxTasks, upstream: self, transform: transform)
     }
     

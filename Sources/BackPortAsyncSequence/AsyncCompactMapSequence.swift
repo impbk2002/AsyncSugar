@@ -86,7 +86,7 @@ extension BackPort.AsyncCompactMapSequence.Iterator: AsyncIteratorProtocol, Type
     /// that transforms to a non-`nil` value. If calling the closure throws an
     /// error, the sequence ends and `next()` rethrows the error.
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         while !finished {
             guard let element = try await baseIterator.next(isolation: actor) else {
                 finished = true
@@ -104,7 +104,7 @@ extension BackPort.AsyncCompactMapSequence.Iterator: AsyncIteratorProtocol, Type
         return nil
     }
     
-
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

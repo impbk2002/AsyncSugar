@@ -9,6 +9,7 @@ import XCTest
 import os
 @testable import Tetra
 import Combine
+import CriticalSection
 
 final class TetraTests: XCTestCase {
     

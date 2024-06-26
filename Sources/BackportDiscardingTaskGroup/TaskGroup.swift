@@ -15,12 +15,12 @@ extension TaskGroup where ChildTaskResult == Void {
     internal mutating func simulateDiscarding<T:Actor, V>(
         isolation actor: isolated T,
         body: (isolated T, inout Self) async  -> sending V
-    ) async  -> V {
+    ) async -> V {
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
         if await holder.isFinished {
             preconditionFailure("SafetyRegion is already used!")
         }
-        addTask {
+        addTask(priority: .background) {
             /// keep at least one child task alive
             /// so that subTask won't return
             await holder.hold()
@@ -34,16 +34,21 @@ extension TaskGroup where ChildTaskResult == Void {
                 }
             }
         }()
-        let value:V
-        // wrap with do block so that `defer` pops before waiting subTask
-        do {
-            /// release suspending Task
-            /// wrap the mutable TaskGroup with actor isolation
-            value = await body(actor, &self)
+        async let mainTask = {
+            let v = await runBlock(isolation: actor, body:body)
             await holder.markDone()
-        }
+            return Suppress(base: v)
+        }()
         await subTask
-        return value
+        return await mainTask.base
+    }
+    
+    @usableFromInline
+    internal mutating func runBlock<T:Actor,V:~Copyable, ErrorRef:Error>(
+        isolation actor: isolated T,
+        body: (isolated T, inout Self) async throws(ErrorRef) -> sending V
+    ) async throws(ErrorRef) -> sending V {
+        try await body(actor, &self)
     }
     
 }
@@ -52,13 +57,32 @@ extension TaskGroup where ChildTaskResult == Void {
 package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T = #isolation,
     body: @Sendable (isolated T, inout TaskGroup<Void>) async -> sending TaskResult
-) async -> TaskResult {
+) async -> sending TaskResult {
      await withTaskGroup(of: Void.self, returning: TaskResult.self) {
          await $0.simulateDiscarding(isolation: actor, body: body)
     }
 }
 
 
+/// simulate `DiscardingTaskGroup` and return the TaskResult
+///
+///  This function is a good workaround for globalActor isolated version of `simuateDiscardingTaskGroup`
+///
+///
+///```
+///await simuateDiscardingTaskGroup { @MainActor group in
+///    group.addTask{ ... }
+///    group.addTask{ ... }
+///    group.addTask{ ... }
+///    return 0
+///}
+///```
+///
+///
+/// - precondition: body can not be nonisolated
+/// - Parameter body: DiscardingTaskGroup body
+/// - Returns: which is returned from body
+/// - SeeAlso: withDiscardingTaskGroup(returning:body:)
 @inlinable
 package func simuateDiscardingTaskGroup<TaskResult: Sendable>(
     body: @Sendable @isolated(any) (inout TaskGroup<Void>) async -> sending TaskResult
@@ -74,6 +98,3 @@ package func simuateDiscardingTaskGroup<TaskResult: Sendable>(
         return await body(&unsafe.base)
     }
 }
-
-
-

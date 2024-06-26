@@ -80,7 +80,7 @@ internal extension NSNumber {
 @inline(__always)
 @usableFromInline
 internal
-func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T,Failure> {
+func wrapToResult<T:~Copyable,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T,Failure> {
     do {
         return .success(try block())
     } catch {
@@ -88,38 +88,12 @@ func wrapToResult<T,Failure:Error>(_ block: () throws(Failure) -> T) -> Result<T
     }
 }
 
-@inline(__always)
-@usableFromInline
-internal
-func wrapToResult<Base: TypedAsyncIteratorProtocol & AsyncIteratorProtocol>(
-    _ actor: isolated (any Actor)?,
-    _ iterator: inout Base
-) async -> sending Result<Base.Element,Base.Failure>? {
-    do {
-        if let value = try await iterator.next(isolation: actor) {
-            return .success(value)
-        }
-        return nil
-//        if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
-//            let value = try await iterator.next(isolation: actor)
-//            if let value {
-//                return .success(value)
-//            } else {
-//                return nil
-//            }
-//        } else {
-//            let result = try await iterator.next()
-//            return result
-//        }
-    } catch {
-        return .failure(error)
-    }
-}
-
 
 @inline(__always)
 @usableFromInline
-internal func wrapToResult<T,Failure:Error, U>(_ value:T, _ transform: (T) async throws(Failure) -> U) async -> sending Result<U,Failure> {
+internal func wrapToResult<T:~Copyable,Failure:Error, U:~Copyable>(
+    _ value: consuming T, _ transform: (consuming T) async throws(Failure) -> sending U
+) async -> sending Result<U,Failure> {
     do {
         let success = try await transform(value)
         return .success(success)

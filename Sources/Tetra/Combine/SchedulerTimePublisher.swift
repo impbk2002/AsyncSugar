@@ -7,6 +7,7 @@
 
 import Foundation
 @preconcurrency import Combine
+internal import CriticalSection
 
 
 public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
@@ -45,7 +46,7 @@ public struct SchedulerTimePublisher<T:Scheduler>: Publisher {
     final class Inner<S:Subscriber>: Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible where S.Input == Output, S.Failure == Failure  {
         
         var description: String {
-            "SchedulerTimer<\(type(of: publisher.scheduler))>"
+            "SchedulerTimePublisher"
         }
         
         var playgroundDescription: Any { description }

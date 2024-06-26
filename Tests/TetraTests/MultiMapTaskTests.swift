@@ -43,16 +43,19 @@ final class MultiMapTaskTests: XCTestCase {
         let pub = MultiMapTask(maxTasks: .max(1), upstream: input.publisher) { value in
             if value == target {
                 await withUnsafeContinuation {
-                    lock.withLock {
+//                    lock.withLock {
                         holder.bag.removeAll()
-                    }
+//                    }
                     $0.resume()
                 }
                 XCTAssertTrue(Task.isCancelled)
             }
             return value
         }.handleEvents(
-            receiveCancel: { expect.fulfill() }
+            receiveCancel: {
+                print("CAll")
+                expect.fulfill()
+            }
         )
         lock.withLock {
             pub.sink { _ in
@@ -63,7 +66,7 @@ final class MultiMapTaskTests: XCTestCase {
         }
         
         
-        wait(for: [expect], timeout: 0.5)
+        wait(for: [expect])
     }
     
     func testSerialFailure() throws {

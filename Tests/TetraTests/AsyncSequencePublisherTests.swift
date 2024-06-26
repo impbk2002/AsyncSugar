@@ -9,6 +9,7 @@ import Foundation
 import XCTest
 @testable import Tetra
 import Combine
+import BackPortAsyncSequence
 
 class AsyncSequencePublisherTests: XCTestCase {
     
@@ -22,7 +23,8 @@ class AsyncSequencePublisherTests: XCTestCase {
             source.forEach{ continuation.yield($0) }
             continuation.finish()
         }
-        let cancellable = AsyncSequencePublisher(base: stream)
+        let cancellable = AsyncTypedStream(base: stream)
+            .tetra.publisher
             .catch{ _ in
                 XCTFail()
                 return Empty<Int, Never>()
@@ -59,7 +61,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             }
             return value
         }
-        let pub = AsyncSequencePublisher(base: asyncSequence)
+        let pub = AsyncSequencePublisher(base: LegacyTypedAsyncSequence(base: asyncSequence))
             .handleEvents(
                 receiveCancel: { expect.fulfill() }
             )
@@ -88,7 +90,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             }
             return value
         }
-        let cancellable = AsyncSequencePublisher(base: asyncSequence)
+        let cancellable = AsyncSequencePublisher(base: LegacyTypedAsyncSequence(base: asyncSequence))
             .mapError{
                 $0 as! CancellationError
             }

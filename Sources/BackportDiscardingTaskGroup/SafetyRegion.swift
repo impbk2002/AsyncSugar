@@ -9,8 +9,10 @@
 @usableFromInline
 package actor SafetyRegion {
     
-    private(set) var isFinished = false
-    private var continuation: UnsafeContinuation<Void,Never>? = nil
+    @usableFromInline
+    internal(set) package var isFinished = false
+    @usableFromInline
+    internal var continuation: UnsafeContinuation<Void,Never>? = nil
     
     @inlinable
     package init() {
@@ -18,8 +20,8 @@ package actor SafetyRegion {
     }
     
     @usableFromInline
-    internal func markDone() {
-        guard !isFinished else { return }
+    package func markDone() {
+//        guard !isFinished else { return }
         isFinished = true
         continuation?.resume()
         continuation = nil

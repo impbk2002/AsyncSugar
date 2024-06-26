@@ -8,7 +8,7 @@
 import XCTest
 @testable import Tetra
 import Combine
-
+import Testing
 
 final class MapTaskTests: XCTestCase {
 
@@ -181,4 +181,8 @@ final class MapTaskTests: XCTestCase {
         token.cancel()
     }
 
+}
+
+func asdfasdf() {
+    
 }

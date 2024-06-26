@@ -57,7 +57,7 @@ extension BackPort.AsyncDropFirstSequence.Iterator: AsyncIteratorProtocol, Typed
     public typealias Failure = Base.AsyncIterator.Err
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         var remainingToDrop = count
         while remainingToDrop > 0 {
             guard try await baseIterator.next(isolation: actor) != nil else {
@@ -70,6 +70,7 @@ extension BackPort.AsyncDropFirstSequence.Iterator: AsyncIteratorProtocol, Typed
         return try await baseIterator.next(isolation: actor)
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

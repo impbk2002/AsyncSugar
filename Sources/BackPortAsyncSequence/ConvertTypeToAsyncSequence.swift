@@ -47,10 +47,11 @@ extension ConvertTypeToAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsync
     public typealias Element = Base.Element
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         try await baseIterator.next(isolation: actor)
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

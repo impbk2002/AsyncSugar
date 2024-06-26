@@ -7,30 +7,35 @@
 
 import Foundation
 @preconcurrency import Combine
+internal import BackPortAsyncSequence
+internal import CriticalSection
+internal import BackportDiscardingTaskGroup
 
-
-struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence & TypedAsyncSequence, TransformFail:Error>: Publisher where Upstream.Output:Sendable{
+struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where Upstream.Output:Sendable, Segment.AsyncIterator.Err == Upstream.Failure, Segment.AsyncIterator: TypedAsyncIteratorProtocol {
     
     typealias Output = Segment.Element
-    typealias Failure = AsyncFlatMapError<Upstream.Failure, TransformFail, Segment.AsyncIterator.Failure>
-    typealias Transform = @Sendable @isolated(any) (Upstream.Output) async throws(TransformFail) -> sending Segment
-    let maxTasks:Subscribers.Demand
+    typealias Failure = Upstream.Failure
+    typealias Transform = @Sendable (Upstream.Output) async throws(Failure) -> sending Segment
+    var priority: TaskPriority? = nil
+    var maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
     
     func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Segment.Element == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
-        let task = Task(operation: processor.run)
+        let task = Task(priority: priority, operation: processor.run)
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
     
     @usableFromInline
     init(
+        priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        transform: @escaping @isolated(any) Transform
+        transform: @escaping Transform
     ) {
+        self.priority = priority
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
@@ -38,31 +43,33 @@ struct AsyncFlatMap<Upstream:Publisher,Segment:AsyncSequence & TypedAsyncSequenc
     
     @usableFromInline
     init<Source>(
+        priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        transform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
-    ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source>, Segment.AsyncIterator.Failure == any Error {
-        let block:Transform = {
-            return .init(base: try await transform($0))
-        }
+        transform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> sending Source
+    ) where Source: AsyncSequence, Segment == LegacyTypedAsyncSequence<Source>, Failure == any Error {
+        self.priority = priority
         self.maxTasks = maxTasks
         self.upstream = upstream
-        self.transform = block
+        self.transform = { (value) throws(Failure) in
+            .init(base: try await transform(value))
+        }
     }
 
     @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
     @usableFromInline
     init<Source>(
+        priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(TransformFail) -> sending Source
-    ) where Source: AsyncSequence, Segment == WrappedAsyncSequenceV2<Source> {
-        let block:Transform = {
-            return .init(base: try await typedTransform($0))
-        }
+        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(Failure) -> sending Source
+    ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source> {
+        self.priority = priority
         self.maxTasks = maxTasks
         self.upstream = upstream
-        self.transform = block
+        self.transform = { (value) throws(Failure) in
+            .init(base: try await typedTransform(value))
+        }
     }
 
     
@@ -73,10 +80,9 @@ extension AsyncFlatMap {
     struct Inner<Down:Subscriber>: Subscriber, Sendable, Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible
     where Segment.Element == Down.Input, Down.Failure == AsyncFlatMap.Failure {
         
-        typealias Transformer = @Sendable (Upstream.Output) async throws(TransformFail) -> sending Segment
+        typealias Transformer = @Sendable (Upstream.Output) async throws(Failure) -> sending Segment
         typealias Input = Upstream.Output
         typealias Failure = Upstream.Failure
-        
         
         let lock:some UnfairStateLock<TaskState> = createUncheckedStateLock(uncheckedState: TaskState())
         
@@ -120,25 +126,21 @@ extension AsyncFlatMap {
                 terminateStream()
                 return
             }
-            await withTaskCancellationHandler {
-                let isCancelled:Bool
-                if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
-                    let void:Void? = try? await withThrowingDiscardingTaskGroup {  group in
-                        defer { terminateStream() }
-                        try await localTask(group: &group)
-                    }
-                    
-                    isCancelled = void == nil
-                } else {
-                    let void:Void? = try? await wrapForBackDeploy(isolation: SafetyRegion())
-                    isCancelled = void == nil
+            if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
+                try? await withThrowingDiscardingTaskGroup {  group in
+                    defer { terminateStream() }
+                    await localTask(
+                        group: &group
+                    )
                 }
-                if !isCancelled {
-                    send(completion: .finished)
+            } else {
+                try? await simuateThrowingDiscardingTaskGroup(isolation: SafetyRegion()) { barrier, group in
+                    defer { terminateStream() }
+                    await localTask(isolation: barrier, group: &group)
                 }
-            } onCancel: {
-                send(completion: nil)
             }
+            send(completion: .finished)
+
         }
         
         var playgroundDescription: Any { description }
@@ -152,6 +154,9 @@ extension AsyncFlatMap {
         }
         
         func receive(completion: Subscribers.Completion<Upstream.Failure>) {
+            lock.withLockUnchecked{
+                $0.upstreamSubscription.transition(.finish)
+            }?.run()
             switch completion {
             case .finished:
                 break
@@ -186,127 +191,16 @@ extension AsyncFlatMap {
         }
         
         func cancel() {
-            lock.withLockUnchecked{
-                $0.taskCondition.transition(.cancel)
-            }?.run()
+            send(completion: nil)
         }
         
-        private func send(completion: Subscribers.Completion<AsyncFlatMap.Failure>?) {
-            valueSource.continuation.finish()
-            let shouldCancel:Bool
-            switch completion {
-            case .none, .failure(.segment(_)), .failure(.transform(_)):
-                shouldCancel = true
-            case .failure(.upstream(_)), .finished:
-                shouldCancel = false
-            }
-            let (subscriber, effect, interruption) = lock.withLockUnchecked{
-                let old = $0.subscriber
-                $0.subscriber = nil
-                let effect = if shouldCancel {
-                    $0.upstreamSubscription.transition(.cancel)
-                } else {
-                    $0.upstreamSubscription.transition(.finish)
-                }
-                let interruption = $0.demandState.transition(.interrupt)
-                return (old, effect, interruption)
-            }
-            if let completion {
-                subscriber?.receive(completion: completion)
-            }
-            effect?.run()
-            interruption?.run()
-        }
-        
-        
-        private func send(_ value:Down.Input) throws(CancellationError) {
-            let subscriber = lock.withLockUnchecked {
-                $0.subscriber
-            }
-            guard let newDemand = subscriber?.receive(value) else {
-                throw CancellationError()
-            }
-            lock.withLockUnchecked{
-                $0.demandState.transition(.resume(newDemand))
-            }?.run()
-        }
-        
-        private func waitForUpStream() async throws {
-            try await withTaskCancellationHandler {
-                try await withUnsafeThrowingContinuation { coninuation in
-                    lock.withLockUnchecked{
-                        $0.upstreamSubscription.transition(.suspend(coninuation))
-                    }?.run()
-                }
-            } onCancel: {
-                lock.withLockUnchecked{
-                    $0.upstreamSubscription.transition(.cancel)
-                }?.run()
-            }
-        }
-        
-        func resumeCondition(_ task:Task<Void,Never>) {
-            lock.withLock{
-                $0.taskCondition.transition(.resume(task))
-            }?.run()
-        }
-        
-        private func waitForCondition() async throws {
-            try await withUnsafeThrowingContinuation{ continuation in
-                lock.withLock{
-                    $0.taskCondition.transition(.suspend(continuation))
-                }?.run()
-            }
-        }
-        
-        private func clearCondition() {
-            lock.withLock{
-                $0.taskCondition.transition(.finish)
-            }?.run()
-        }
-        
-        private func terminateStream() {
-            valueSource.continuation.finish()
-        }
-        
-        private func makeSegment(_ input:Upstream.Output) async throws(CancellationError) -> sending Segment {
-            let result:Result<Segment,TransformFail>
-            do {
-                let seg = try await transform(input)
-                result = .success(seg)
-            } catch {
-                result = .failure(error )
-            }
-            switch result {
-            case .success(let success):
-                return success
-            case .failure(let failure):
-                send(completion: .failure(.transform(failure)))
-                throw CancellationError()
-            }
-        }
-        
-        /// whether demand is unlimited
-        /// - Returns: `true` if demand is unlimited, `false` if demand is just `1`.
-        /// - throws: `CancellationError` if internal state reached cancellation
-        private func nextDemand() async throws -> Bool {
-            try await withUnsafeThrowingContinuation { continuation in
-                lock.withLockUnchecked{
-                    $0.demandState.transition(.suspend(continuation))
-                }?.run()
-            }
-        }
-        
-        
-        /// process next segment and send event to downstream
-        /// - Returns: `false` if iterator reached termination otherwise `true`
-        /// - throws: `CancellationError` if internal state reached cancellation
-        private func processNextSegment(
-            iterator: inout Segment.AsyncIterator
-        ) async throws(CancellationError) -> Bool {
-            let nextResult = await wrapToResult(#isolation, &iterator)
-            switch nextResult {
-            case .none:
+        // almost uncontented call
+        private func handleDownStream(
+            isolation actor: isolated some Actor,
+            event: Result<Suppress<Output>?, EitherFailure<Failure, Failure>>
+        ) async {
+            switch event {
+            case .success(.none):
                 //finished
                 // check and request more transformer
                 // request one more from upstream subscription
@@ -324,52 +218,215 @@ extension AsyncFlatMap {
                     if let subscription {
                         subscription.request(.max(1))
                         effect?.run()
-                    } else {
-                        throw CancellationError()
                     }
                 }
-                return false
-            case .failure(let error):
-                send(completion: .failure(.segment(error)))
-                throw CancellationError()
-            case .success(let value):
-                try send(value)
+            case .success(let success?):
+                send(
+                    isolation: actor,
+                    success.value
+                )
+                return
+            case .failure(let failure):
+                send(completion: .failure(failure))
+                return
             }
-            return true
+            return
         }
         
-        func wrapForBackDeploy(
-            isolation actor: isolated SafetyRegion
-        ) async throws {
-            try await withThrowingTaskGroup(of: Void.self) {
-                defer { terminateStream() }
-                try await $0.simulateDiscarding(isolation: actor) { isolation, group in
-                    try await localTask(isolation: isolation, group: &group)
+        // almost uncontented call
+        private func send(
+            completion: Subscribers.Completion<EitherFailure<Failure, Failure>>?
+        ) {
+            valueSource.continuation.finish()
+            let shouldCancel:Bool
+            switch completion {
+            case .none, .failure(.second(_)):
+                shouldCancel = true
+            case .failure(.first(_)), .finished:
+                shouldCancel = false
+            }
+            let (subscriber, effect, interruption, taskEffect) = lock.withLockUnchecked{
+                let old = $0.subscriber
+                $0.subscriber = nil
+                let effect = if shouldCancel {
+                    $0.upstreamSubscription.transition(.cancel)
+                } else {
+                    $0.upstreamSubscription.transition(.finish)
                 }
+                let interruption = $0.demandState.transition(.interrupt)
+                let taskEffect = if shouldCancel {
+                    $0.taskCondition.transition(.cancel)
+                } else {
+                    $0.taskCondition.transition(.finish)
+                }
+                return (old, effect, interruption, taskEffect)
+            }
+            effect?.run()
+            interruption?.run()
+            switch completion {
+            case .finished:
+                subscriber?.receive(completion: .finished)
+            case .failure(.first(let error)), .failure(.second(let error)):
+                subscriber?.receive(completion: .failure(error))
+            case nil:
+                break
+            }
+            taskEffect?.run()
+        }
+        
+        // almost uncontented call
+        private func send(
+            isolation actor: isolated some Actor,
+            _ value:Down.Input
+        ) {
+            // use lock but this is isolated so we expect uncontended
+            let subscriber = lock.withLockUnchecked {
+                $0.subscriber
+            }
+            guard let newDemand = subscriber?.receive(value) else {
+                return
+            }
+            lock.withLockUnchecked{
+                $0.demandState.transition(.resume(newDemand))
+            }?.run()
+        }
+        
+        // contention case
+        private func waitForUpStream() async throws {
+            try await withTaskCancellationHandler {
+                try await withUnsafeThrowingContinuation { coninuation in
+                    lock.withLockUnchecked{
+                        $0.upstreamSubscription.transition(.suspend(coninuation))
+                    }?.run()
+                }
+            } onCancel: {
+                lock.withLockUnchecked{
+                    $0.upstreamSubscription.transition(.cancel)
+                }?.run()
+            }
+        }
+        
+        // contention case
+        func resumeCondition(_ task:Task<Void,Never>) {
+            lock.withLock{
+                $0.taskCondition.transition(.resume(task))
+            }?.run()
+        }
+        
+        // contention case
+        private func waitForCondition() async throws {
+            try await withUnsafeThrowingContinuation{ continuation in
+                lock.withLock{
+                    $0.taskCondition.transition(.suspend(continuation))
+                }?.run()
+            }
+        }
+        // almost uncontented call
+        private func clearCondition() {
+            lock.withLock{
+                $0.taskCondition.transition(.finish)
+            }?.run()
+        }
+        
+        private func terminateStream() {
+            valueSource.continuation.finish()
+        }
+        
+        private func makeSegment(_ input:Upstream.Output) async -> sending Result<Segment, Failure> {
+            let result:Result<Segment,Failure>
+            do {
+                let seg = try await transform(input)
+                result = .success(seg)
+            } catch {
+                result = .failure(error )
+            }
+            return result
+        }
+        
+        // almost uncontented call
+        /// whether demand is unlimited
+        /// - Returns: `true` if demand is unlimited, `false` if demand is just `1`.
+        /// - throws: `CancellationError` if internal state reached cancellation
+        private func nextDemand(
+            barrier:isolated some Actor
+        ) async throws -> Bool {
+            try await withUnsafeThrowingContinuation { continuation in
+                lock.withLockUnchecked{
+                    $0.demandState.transition(.suspend(continuation))
+                }?.run()
+            }
+        }
+        
+
+        /// process next segment and send event to downstream
+        /// - Returns: `false` if iterator reached termination otherwise `true`
+        private func processNextSegment(
+            iterator: inout Segment.AsyncIterator,
+            barrier: some Actor
+        ) async -> Bool {
+            let result:Result<Output, Failure>?
+            do {
+                if let value = try await iterator.next(isolation: nil) {
+                    result = .success(value)
+                } else {
+                    result = nil
+                }
+            } catch {
+                result = .failure(error)
+            }
+            switch result {
+            case .none:
+                await handleDownStream(isolation: barrier, event: .success(.none))
+                return false
+            case .failure(let error):
+                await handleDownStream(isolation: barrier, event: .failure(.second(error)))
+                return false
+            case .success(let value):
+                await handleDownStream(isolation: barrier, event: .success(.init(value: value)))
+                return true
             }
         }
         
         private func localTask(
             isolation actor: isolated (any Actor)? = #isolation,
-            group: inout some CompatThrowingDiscardingTaskGroup
-        ) async throws {
+            group: inout some CompatDiscardingTaskGroup<any Error>
+        ) async {
+            let barrier = actor as? SafetyRegion ?? .init()
             for await result in valueSource.stream {
+                if await barrier.isFinished {
+                    break
+                }
                 switch result {
                 case .failure(let failure):
-                    send(completion: .failure(.upstream(failure)))
-                    throw CancellationError()
+                    await handleDownStream(
+                        isolation: barrier,
+                        event: .failure(.first(failure))
+                    )
+                    return
                 case .success(let value):
                     let isSuccess = group.addTaskUnlessCancelled(priority: nil) {
-                        let segment = try await makeSegment(value)
-                        var iterator = segment.makeAsyncIterator()
+                        let segmentResult = await makeSegment(value)
+                        var iterator:Segment.AsyncIterator
+                        switch segmentResult {
+                        case .failure(let failure):
+                            await barrier.markDone()
+                            await handleDownStream(
+                                isolation: barrier,
+                                event: .failure(.second(failure))
+                            )
+                            return
+                        case .success(let source):
+                            iterator = source.makeAsyncIterator()
+                        }
                         while true {
-                            let isUnlimited = try await nextDemand()
+                            let isUnlimited = try await nextDemand(barrier: barrier)
                             if isUnlimited {
-                                while try await processNextSegment(iterator: &iterator) {
+                                while await processNextSegment(iterator: &iterator, barrier: barrier) {
+                                    
                                 }
                                 return
                             } else {
-                                let hasNext = try await processNextSegment(iterator: &iterator)
+                                let hasNext = await processNextSegment(iterator: &iterator, barrier: barrier)
                                 if !hasNext {
                                     return
                                 }
@@ -377,7 +434,7 @@ extension AsyncFlatMap {
                         }
                     }
                     if !isSuccess {
-                        throw CancellationError()
+                        return
                     }
                     
                 }

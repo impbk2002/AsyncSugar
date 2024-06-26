@@ -5,9 +5,6 @@
 //  Created by 박병관 on 6/13/24.
 //
 
-import Foundation
-
-
 extension BackPort {
     
     public struct AsyncDropWhileSequence<Base: AsyncSequence> where Base.AsyncIterator: TypedAsyncIteratorProtocol {
@@ -91,7 +88,7 @@ extension BackPort.AsyncDropWhileSequence.Iterator: AsyncIteratorProtocol, Typed
     /// received from its base iterator as-is, and never executes the predicate
     /// closure again.
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         while !finished && !doneDropping {
             guard let element = try await baseIterator.next(isolation: actor) else {
                 return nil
@@ -112,6 +109,7 @@ extension BackPort.AsyncDropWhileSequence.Iterator: AsyncIteratorProtocol, Typed
         return try await baseIterator.next(isolation: actor)
     }
 
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

@@ -11,7 +11,7 @@ import CoreData
 #endif
 
 @usableFromInline
-internal final class ClosureHolder<R,Failure:Error> {
+internal final class ClosureHolder<R:~Copyable,Failure:Error>: @unchecked Sendable {
     @usableFromInline let closure: () throws(Failure) -> R
     
     @inlinable
@@ -20,14 +20,21 @@ internal final class ClosureHolder<R,Failure:Error> {
     }
     
     @inlinable
-    func callAsFunction() throws(Failure) -> R {
-        return try closure()
+    func callAsFunction() -> Result<R,Failure> {
+        do {
+            let value = try closure()
+            return .success(value)
+        } catch {
+            return .failure(error)
+        }
     }
+    
 }
+
 
 #if canImport(CoreData)
 @usableFromInline
-internal final class CoreDataContextClosureHolder<R, Failure:Error> {
+internal final class CoreDataContextClosureHolder<R:~Copyable, Failure:Error> {
     @usableFromInline let closure: (NSManagedObjectContext) throws(Failure) -> R
     
     @inlinable
@@ -36,8 +43,13 @@ internal final class CoreDataContextClosureHolder<R, Failure:Error> {
     }
     
     @inlinable
-    func callAsFunction(_ context:NSManagedObjectContext) throws(Failure) -> R {
-        return try closure(context)
+    func callAsFunction(_ context:NSManagedObjectContext) -> Result<R,Failure> {
+        do {
+            let value = try closure(context)
+            return .success(value)
+        } catch {
+            return .failure(error)
+        }
     }
 }
 #endif

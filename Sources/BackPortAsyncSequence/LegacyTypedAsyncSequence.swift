@@ -53,7 +53,7 @@ extension LegacyTypedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIt
     public typealias Failure = any Error
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
             return try await baseIterator.next(isolation: actor)
         } else {
@@ -61,11 +61,13 @@ extension LegacyTypedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIt
         }
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
-        try await next(isolation: nil)
+        try await baseIterator.next()
     }
     
+    @inline(__always)
     @usableFromInline
     internal mutating func advance() async throws(Failure) -> sending Element? {
         try await baseIterator.next()

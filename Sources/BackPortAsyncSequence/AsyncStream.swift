@@ -21,6 +21,7 @@ extension AsyncTypedStream: AsyncSequence, TypedAsyncSequence {
     
     public typealias Failure = Never
     
+    @inlinable
     public func makeAsyncIterator() -> Iterator {
         Iterator(baseIterator: base.makeAsyncIterator())
     }
@@ -44,7 +45,7 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
     public typealias Failure = Never
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async -> Element? {
         if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
             return await baseIterator.next(isolation: actor)
         } else {
@@ -52,9 +53,10 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
         }
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async -> Element? {
-        await next(isolation: nil)
+        await baseIterator.next()
     }
     
     @inline(__always)
@@ -65,15 +67,5 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
     
 }
 
-extension AsyncStream {
-    
-    func bridge() -> some TypedAsyncSequence<Element, Never> {
-        AsyncTypedStream(base: self)
-    }
-    
-    func bridge2() -> some TypedAsyncSequence<Element, Never> {
-        AsyncMapErrorSequence(base: LegacyTypedAsyncSequence(base: self)) { _ throws(Never) in
-            
-        }
-    }
-}
+extension AsyncTypedStream: Sendable where Element: Sendable {}
+

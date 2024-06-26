@@ -51,10 +51,11 @@ extension WrappedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIterat
     public typealias Failure = Base.Failure
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         try await baseIterator.next(isolation: actor)
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)
@@ -63,8 +64,6 @@ extension WrappedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIterat
 }
 
 
-@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
 extension WrappedAsyncSequence: Sendable where Base: Sendable, Base.Element: Sendable {}
 
-@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
 extension WrappedAsyncSequence.Iterator: Sendable where Base.AsyncIterator: Sendable, Base.Element: Sendable {}

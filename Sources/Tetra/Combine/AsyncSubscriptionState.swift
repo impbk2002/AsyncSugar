@@ -58,6 +58,27 @@ enum AsyncSubscriptionState {
         
     }
     
+    @usableFromInline
+    func shouldMutate(_ event: Event) -> Bool {
+        switch self {
+        case .waiting:
+            return true
+        case .suspending(_):
+            if case .suspend = event {
+                return false
+            } else {
+                return true
+            }
+        case .cached(_):
+            if case .resume = event {
+                return false
+            } else {
+                return true
+            }
+        case .cancelled, .finished:
+            return false
+        }
+    }
     
     mutating func transition(_ event:Event) -> sending Effect? {
         switch event {
@@ -98,10 +119,9 @@ enum AsyncSubscriptionState {
         case .suspending(let unsafeContinuation):
             self = .cached(subscription)
             return .resume(unsafeContinuation)
-        case .cached(let old):
-            self = .cached(subscription)
+        case .cached:
             assertionFailure("Received Subscription more than Once")
-            return .cancel(old)
+            return .cancel(subscription)
         case .cancelled:
             fallthrough
         case .finished:
@@ -115,9 +135,9 @@ enum AsyncSubscriptionState {
             self = .suspending(continuation)
             return nil
         case .suspending(let unsafeContinuation):
-            self = .suspending(continuation)
+            self = .suspending(unsafeContinuation)
             assertionFailure("Received Continuation more than Once")
-            return .raise(unsafeContinuation)
+            return .raise(continuation)
         case .cancelled:
             return .raise(continuation)
         case .finished:

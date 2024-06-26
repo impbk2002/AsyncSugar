@@ -8,7 +8,8 @@
 import Foundation
 import Combine
 
-struct PendingDemandState {
+struct PendingDemandState{
+    
     private var taskCount:Int
     private var pendingDemand:Subscribers.Demand
     
@@ -51,7 +52,5 @@ struct PendingDemandState {
             return snapShot
         }
     }
-
-
     
 }

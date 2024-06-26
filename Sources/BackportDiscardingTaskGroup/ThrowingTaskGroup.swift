@@ -21,7 +21,7 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
         if await holder.isFinished {
             preconditionFailure("SafetyRegion is already used!")
         }
-        addTask {
+        addTask(priority: .background) {
             /// keep at least one child task alive
             /// so that subTask won't return
             await holder.hold()
@@ -34,20 +34,38 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
                 }
             }
         }()
-        let value:V
-        // wrap with do block so that `defer` pops before waiting subTask
+        async let mainTask = {
+            do {
+                let v = try await runBlock(isolation: actor, body:body)
+                await holder.markDone()
+                return Suppress(base: v)
+            } catch {
+                await holder.markDone()
+                throw error
+            }
+        }()
+        let errorRef:(any Error)?
         do {
-            /// release suspending Task
-            /// wrap the mutable TaskGroup with actor isolation
-            value = try await body(actor, &self)
-            await holder.markDone()
-            
+            // wait for subTask first to trigger priority elavation
+            // (release finished tasks as soon as possible)
+            try await subTask
+            errorRef = nil
         } catch {
-            await holder.markDone()
-            throw error
+            errorRef = error
         }
-        try await subTask
+        let value = try await mainTask.base
+        if let errorRef {
+            throw errorRef
+        }
         return value
+    }
+    
+    @usableFromInline
+    internal mutating func runBlock<T:Actor,V:~Copyable, ErrorRef:Error>(
+        isolation actor: isolated T,
+        body: (isolated T, inout Self) async throws(ErrorRef) -> sending V
+    ) async throws(ErrorRef) -> sending V {
+        try await body(actor, &self)
     }
     
 }

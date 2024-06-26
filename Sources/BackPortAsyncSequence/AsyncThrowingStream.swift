@@ -45,7 +45,7 @@ extension AsyncTypedThrowingStream: AsyncSequence, TypedAsyncSequence {
 extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
             return try await baseIterator.next(isolation: actor)
         } else {
@@ -57,6 +57,7 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
         }
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)
@@ -70,6 +71,9 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
     
 }
 
+extension AsyncTypedThrowingStream: Sendable where Element: Sendable {}
+
+
 extension AsyncThrowingStream {
     
     func bridge() -> some TypedAsyncSequence<Element, Failure> {
@@ -77,3 +81,4 @@ extension AsyncThrowingStream {
     }
     
 }
+

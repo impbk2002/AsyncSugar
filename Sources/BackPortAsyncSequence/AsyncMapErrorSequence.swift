@@ -40,7 +40,8 @@ public struct AsyncMapErrorSequence<Base:AsyncSequence, Failure:Error> where Bas
 extension AsyncMapErrorSequence:AsyncSequence, TypedAsyncSequence  {
     
     public typealias AsyncIterator = Iterator
-    public typealias Failure = AsyncIterator.Failure
+    public typealias Failure = Failure
+//    public typealias Failure = AsyncIterator.Failure
     
     
     public struct Iterator {
@@ -73,9 +74,9 @@ extension AsyncMapErrorSequence:AsyncSequence, TypedAsyncSequence  {
 extension AsyncMapErrorSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
     
     public typealias Element = Base.Element
-    
+    public typealias Failure = Failure
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         do {
             let value = try await base?.next(isolation: actor)
             if value == nil {
@@ -89,6 +90,7 @@ extension AsyncMapErrorSequence.Iterator: AsyncIteratorProtocol, TypedAsyncItera
         }
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

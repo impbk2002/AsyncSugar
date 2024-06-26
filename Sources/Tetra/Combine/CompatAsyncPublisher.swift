@@ -8,6 +8,7 @@
 
 import Foundation
 @preconcurrency import Combine
+internal import BackPortAsyncSequence
 
 public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure == Never {
 
@@ -36,9 +37,15 @@ public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure =
         internal let inner = AsyncSubscriber<P>()
         @usableFromInline
         internal let reference:AnyCancellable
-          
+        
+        @_disfavoredOverload
         @inlinable
-        public func next(isolation actor: isolated (any Actor)?) async -> P.Output? {
+        public mutating func next() async throws(Never) -> P.Output? {
+            await next(isolation: nil)
+        }
+        
+        @inlinable
+        public func next(isolation actor: isolated (any Actor)? = #isolation) async -> P.Output? {
             let result: Result<P.Output,Never>? = await withTaskCancellationHandler { [inner] in
                 await inner.next(isolation: actor)
             } onCancel: { [reference] in

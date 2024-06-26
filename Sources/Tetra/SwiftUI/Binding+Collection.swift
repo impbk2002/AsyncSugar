@@ -9,7 +9,7 @@
 //
 
 import Foundation
-@preconcurrency import SwiftUI
+import SwiftUI
 
 @available(watchOS, deprecated: 8.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(macOS, deprecated: 12.0, message: "use Binding<MutableCollection> itself as Collection")

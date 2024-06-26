@@ -8,6 +8,7 @@
 import XCTest
 import Combine
 @testable import Tetra
+@testable import BackPortAsyncSequence
 
 final class AsyncFlatMapTests: XCTestCase {
 
@@ -23,20 +24,22 @@ final class AsyncFlatMapTests: XCTestCase {
                 }
             )
             .asyncFlatMap(maxTasks: .max(1)) { value in
-                AsyncStream<Int>{ continuation in
+                let base = AsyncTypedStream(base: AsyncStream<Int>{ continuation in
                     sample.forEach{
                         continuation.yield($0)
                     }
                     continuation.finish()
-                }.map{
+                })
+                return BackPort.AsyncMapSequence(base, transform: {
                     await Task.yield()
                     return $0
-                }
+                })
             }.handleEvents(
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }
-            ).mapError{ $0.unwrap() }
+            )
+            
             // ensure downstream do not request unlimited
             .buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
             .prefix(10)
@@ -62,26 +65,25 @@ final class AsyncFlatMapTests: XCTestCase {
                 }
             )
             .asyncFlatMap(maxTasks: .max(2)) { value in
-                return AsyncStream<Int>{ continuation in
+                let base = AsyncTypedStream(base: AsyncStream<Int>{ continuation in
                     sample.forEach{
                         continuation.yield($0 + value * 10)
                     }
                     continuation.finish()
-                }.map{
+                })
+                return BackPort.AsyncMapSequence(base, transform: {
                     await Task.yield()
                     return $0
-                }
+                })
             }.handleEvents(
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }
-            ).mapError{ $0.unwrap() }
+            )
             .sink { _ in
                 completion.fulfill()
             } receiveValue: { value in
-                lock.withLock{
-                    array.append(value)
-                }
+                array.append(value)
                 
             }
         wait(for: [completion])
@@ -99,11 +101,11 @@ final class AsyncFlatMapTests: XCTestCase {
                     lock.withLock{
                         holder.bag = []
                     }
-                    return AsyncStream<Int>{
+                    return AsyncTypedStream(base: AsyncStream<Int>{
                         $0.yield(value)
                         $0.finish()
-                    }
-                }.mapError{ $0.unwrap() }
+                    })
+                }
                 .handleEvents(
                     receiveCancel: {
                         completion.fulfill()
@@ -123,17 +125,20 @@ final class AsyncFlatMapTests: XCTestCase {
         let lock = NSRecursiveLock()
         lock.withLock {
             (0..<5).publisher
-                .asyncFlatMap(maxTasks: .unlimited) { value in
-                    return AsyncStream<Int>{
+//                .setFailureType(to: Error.self)
+                .asyncFlatMap(maxTasks: .unlimited) { value throws(Never) in
+                    let stream = AsyncStream<Int>{
                         $0.yield(value)
                         $0.finish()
-                    }.map{
+                    }
+                    let source = AsyncTypedStream(base: stream)
+                    return BackPort.AsyncMapSequence(source) {
                         lock.withLock{
                             holder.bag = []
                         }
                         return $0
                     }
-                }.mapError{ $0.unwrap() }
+                }
                 .handleEvents(
                     receiveCancel: {
                         completion.fulfill()
@@ -153,13 +158,13 @@ final class AsyncFlatMapTests: XCTestCase {
         let lock = NSRecursiveLock()
         lock.withLock {
             (0..<5).publisher
+//                .setFailureType(to: Error.self)
                 .asyncFlatMap(maxTasks: .unlimited) { @Sendable value in
-                    return AsyncStream<Int>{ @Sendable in
+                    let stream = AsyncStream<Int>{ @Sendable in
                         $0.yield(value)
                         $0.finish()
                     }
-                }.mapError{
-                    $0.unwrap()
+                    return AsyncTypedStream(base: stream)
                 }.handleEvents(
                     receiveCancel: { @Sendable in
                         completion.fulfill()
@@ -167,43 +172,33 @@ final class AsyncFlatMapTests: XCTestCase {
                 ).sink { _ in
                     XCTFail("should not reach here")
                 } receiveValue: { _ in
-                    lock.withLock{
-                        holder.bag = []
-                    }
+                    holder.bag = []
                 }.store(in: &holder.bag)
         }
         wait(for: [completion], timeout: 0.2)
     }
     
     
-    @available(macOS 9999, *)
     func testThrowInTransformer() throws {
         let holder = UnsafeCancellableHolder()
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
-            .asyncFlatMap(maxTasks: .max(1)) { value in
+            .setFailureType(to: CancellationError.self)
+            .asyncFlatMap(maxTasks: .max(1)) { value throws(CancellationError) in
                 if value == 3 {
                     throw CancellationError()
                 }
-                return AsyncStream<Int>{
+                let base = AsyncTypedStream(base: AsyncStream<Int>{
                     $0.yield(value)
                     $0.finish()
-                }
-            }.mapError{
-                switch $0 {
-                case .transform(let error):
-                    return error
-                case .segment(let error):
-                    XCTFail("should not throw during segment")
-                    return error
-                }
+                })
+                return AsyncMapErrorSequence(base: base, failure: CancellationError.self)
             }.sink {
                 switch $0 {
                 case .finished:
                     break
                 case .failure(let error):
                     completion.fulfill()
-                    XCTAssertTrue(error is CancellationError)
                 }
             } receiveValue: {
                 XCTAssertLessThan($0, 3)
@@ -215,22 +210,18 @@ final class AsyncFlatMapTests: XCTestCase {
         let holder = UnsafeCancellableHolder()
         let completion = expectation(description: "cancellation")
         (0..<5).publisher
-            .asyncFlatMap(maxTasks: .max(1)) { value in
-                return AsyncStream<Int>{
+            .setFailureType(to: CancellationError.self)
+            .asyncFlatMap(maxTasks: .max(1)) { value throws(CancellationError) in
+                let base = AsyncTypedStream(base: AsyncStream<Int>{
                     $0.yield(value)
                     $0.finish()
-                }.map{
-                    if $0 == 3 {
+                })
+                return BackPort.AsyncMapSequence(base, CancellationError.self, transform: { value2 throws(CancellationError) in
+                    if value2 == 3 {
                         throw CancellationError()
                     }
-                    return $0
-                }
-            }
-            .mapError{
-                switch $0 {
-                case .segment(let error):
-                    return error
-                }
+                    return value2
+                })
             }
             .sink {
                 switch $0 {
@@ -261,8 +252,7 @@ final class AsyncFlatMapTests: XCTestCase {
                     }
                 }
                 let transformTask = withUnsafeCurrentTask{ $0 }?.hashValue
-                
-                return AsyncStream<Int>{
+                let stream = AsyncStream<Int>{
                     await Task.yield()
                     withUnsafeCurrentTask {
                         XCTAssertEqual(transformTask, $0?.hashValue)
@@ -273,8 +263,7 @@ final class AsyncFlatMapTests: XCTestCase {
                     withUnsafeCurrentTask{$0?.cancel()}
                     return value
                 }
-            }.mapError{
-                $0.unwrap()
+                return AsyncTypedStream(base: stream)
             }.sink { _ in
                 completion.fulfill()
             } receiveValue: {
@@ -285,4 +274,5 @@ final class AsyncFlatMapTests: XCTestCase {
     }
 
 
+ 
 }

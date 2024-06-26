@@ -77,7 +77,7 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
     public typealias Failure = Base.AsyncIterator.Err
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         while !finished {
             if var iterator = currentIterator {
                 do {
@@ -116,6 +116,7 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
         return nil
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

@@ -7,6 +7,7 @@
 
 import Foundation
 @preconcurrency import Combine
+internal import CriticalSection
 
 /**
  
@@ -37,14 +38,17 @@ public struct MapTask<Upstream:Publisher, Output>: Publisher where Upstream.Outp
 
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
-
+    public typealias Transform = @Sendable @isolated(any) (Upstream.Output) async -> sending Result<Output,Failure>
+    public var priority: TaskPriority? = nil
     public let upstream:Upstream
-    public var transform:@Sendable @isolated(any) (Upstream.Output) async -> sending Result<Output,Failure>
+    public var transform:Transform
 
     public init(
+        priority: TaskPriority? = nil,
         upstream: Upstream,
         transform: @escaping @Sendable @isolated(any) (Upstream.Output) async -> sending Output
     ) {
+        self.priority = priority
         self.upstream = upstream
         self.transform = {
             Result.success(await transform($0))
@@ -52,16 +56,19 @@ public struct MapTask<Upstream:Publisher, Output>: Publisher where Upstream.Outp
     }
     
     public init(
+        priority: TaskPriority? = nil,
         upstream: Upstream,
-        handler: @escaping @Sendable @isolated(any) (Upstream.Output) async -> sending Result<Output,Failure>
+        handler: @escaping Transform
     ) {
+        self.priority = priority
         self.upstream = upstream
         self.transform = handler
     }
 
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
+        
         let processor = Inner(subscriber: subscriber, transform: transform)
-        let task = Task(operation: processor.run)
+        let task = Task(priority: priority, operation: processor.run)
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
@@ -86,19 +93,20 @@ extension MapTask {
         
         private let valueSource = AsyncStream<Result<Upstream.Output,Failure>>.makeStream(bufferingPolicy: .bufferingNewest(2))
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: .init())
-        private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+        private let transform: Transform
         let combineIdentifier = CombineIdentifier()
         
         init(
             subscriber:S,
-            transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+            transform: @escaping Transform
         ) {
             self.transform = transform
             state.withLockUnchecked{ $0.subscriber = subscriber }
         }
         
+        
         private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
-            let (subscriber, effect) = state.withLockUnchecked{
+            let (subscriber, effect, taskEffect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
                 let effect = if cancel {
@@ -106,12 +114,18 @@ extension MapTask {
                 } else {
                     $0.upstreamSubscription.transition(.finish)
                 }
-                return (old, effect)
+                let taskEffect = if cancel {
+                    $0.condition.transition(.cancel)
+                } else {
+                    $0.condition.transition(.finish)
+                }
+                return (old, effect, taskEffect)
             }
             effect?.run()
             if let completion {
                 subscriber?.receive(completion: completion)
             }
+            taskEffect?.run()
         }
         
         private func send(_ value:Output) throws {
@@ -183,31 +197,42 @@ extension MapTask {
             guard success != nil else {
                 return
             }
-            try? await withTaskCancellationHandler {
-                for await upstreamResult in valueSource.stream {
-                    let upValue: Upstream.Output
-                    switch upstreamResult {
-                    case .failure(let error):
-                        send(completion: .failure(error), cancel: false)
-                        throw CancellationError()
-                    case .success(let value):
-                        upValue = value
-                    }
-                    // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
-                    async let job = transform(upValue)
-                    switch (await job) {
-                    case .failure(let error):
-                        send(completion: .failure(error), cancel: true)
-                        throw CancellationError()
-                    case .success(let value):
+            await runIn(isolation: transform.isolation)
+
+        }
+        
+        internal func runIn(
+            isolation actor:isolated (any Actor)? = #isolation
+        ) async {
+            let block = { @Sendable in
+                let value = await transform($0)
+                return value.map(Suppress.init)
+            }
+            for await upstreamResult in valueSource.stream {
+                let upValue: Upstream.Output
+                switch upstreamResult {
+                case .failure(let error):
+                    send(completion: .failure(error), cancel: false)
+                    return
+                case .success(let value):
+                    upValue = value
+                }
+
+                // enqueue to separate task to prevent transformer cancelling root task using `UnsafeCurrentTask`
+                async let job = block(upValue)
+                switch (await job).map(\.value) {
+                case .failure(let error):
+                    send(completion: .failure(error), cancel: true)
+                    return
+                case .success(let value):
+                    do {
                         try send(value)
+                    } catch {
+                        return
                     }
                 }
-                send(completion: .finished)
-            } onCancel: {
-                send(completion: nil, cancel: true)
             }
-
+            send(completion: .finished)
         }
         
     }
@@ -238,6 +263,9 @@ extension MapTask.Inner: Subscriber {
     }
     
     func receive(completion: Subscribers.Completion<Upstream.Failure>) {
+        state.withLockUnchecked {
+            $0.upstreamSubscription.transition(.finish)
+        }?.run()
         switch completion {
         case .finished:
             break
@@ -253,9 +281,7 @@ extension MapTask.Inner: Subscriber {
 extension MapTask.Inner: Subscription {
     
     func cancel() {
-        state.withLock{
-            $0.condition.transition(.cancel)
-        }?.run()
+        send(completion: nil, cancel: true)
     }
     
     func request(_ demand: Subscribers.Demand) {

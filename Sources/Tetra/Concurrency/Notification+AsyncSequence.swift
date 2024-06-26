@@ -8,9 +8,11 @@
 
 import Foundation
 import _Concurrency
+internal import BackPortAsyncSequence
+
+public import CriticalSection
 
 extension NotificationCenter: TetraExtended {}
-
 
 extension TetraExtension where Base: NotificationCenter {
     
@@ -22,8 +24,7 @@ extension TetraExtension where Base: NotificationCenter {
 }
 
 
-
-public final class NotificationSequence: AsyncSequence, Sendable {
+public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequence {
     
     public typealias AsyncIterator = Iterator
     public typealias Failure = Never
@@ -32,16 +33,20 @@ public final class NotificationSequence: AsyncSequence, Sendable {
         Iterator(parent: self)
     }
     
+    @usableFromInline
     let center: NotificationCenter
-    private let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
+    @usableFromInline
+    let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
 
     public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         public typealias Element = Notification
         public typealias Failure = Never
         
+        @usableFromInline
         let parent:NotificationSequence
         
-        public func next(isolation actor: isolated (any Actor)?) async throws(Never) -> Notification? {
+        @inlinable
+        public func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Never) -> Notification? {
             //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(
                 operation: { [parent] in
@@ -50,16 +55,26 @@ public final class NotificationSequence: AsyncSequence, Sendable {
                 onCancel: parent.cancel
             )
         }
+        
+        @_disfavoredOverload
+        @inlinable
+        public func next() async throws(Never) -> Notification? {
+            await next(isolation: nil)
+        }
 
     }
     
-    private struct NotficationState {
+    @usableFromInline
+    internal struct NotficationState {
+        @usableFromInline
         var buffer:[Notification] = []
+        @usableFromInline
         var pending:[UnsafeContinuation<Notification?,Never>] = []
+        @usableFromInline
         var observer:NSObjectProtocol?
     }
     
-    
+    @inlinable
     public init(
         center: NotificationCenter,
         named name: Notification.Name,
@@ -86,11 +101,12 @@ public final class NotificationSequence: AsyncSequence, Sendable {
         }
     }
     
-
+    @inlinable
     deinit {
         cancel()
     }
     
+    @usableFromInline
     @Sendable
     func cancel() {
         let snapShot = lock.withLockUnchecked {
@@ -106,6 +122,7 @@ public final class NotificationSequence: AsyncSequence, Sendable {
         snapShot.pending.forEach{ $0.resume(returning: nil) }
     }
     
+    @usableFromInline
     func next(isolation: isolated (any Actor)?) async -> Notification? {
         await withUnsafeContinuation { continuation in
             let (notification, isCancelled) = lock.withLockUnchecked { state in

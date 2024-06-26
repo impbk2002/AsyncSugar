@@ -4,48 +4,55 @@
 //
 //  Created by 박병관 on 6/13/24.
 //
-import Darwin
 
 public enum BackPort {
     
 }
 
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncStream.Iterator: TypedAsyncIteratorProtocol {}
 
-import Synchronization
-import Builtin
-//
-//
-//@_rawLayout(like: os_unfair_lock, movesAsLike)
-//@usableFromInline
-//package struct UnfairPrimitive: ~Copyable {
-//    
-//    @inlinable
-//    package init() {
-//        pointer.initialize(to: .init())
-//    }
-//    
-//    @usableFromInline
-//    internal var pointer:UnsafeMutablePointer<os_unfair_lock> {
-//        withUnsafePointer(to: self) {
-//            UnsafeMutableRawPointer(mutating: $0).assumingMemoryBound(to: os_unfair_lock.self)
-//        }
-//    }
-//    
-//    @inlinable
-//    borrowing package func lock() {
-//        UnsafeMutableRawPointer(Builtin.addressOfRawLayout(self))
-//        os_unfair_lock_lock(pointer)
-//    }
-//    
-//    @inlinable
-//    borrowing package func unlock() {
-//        os_unfair_lock_unlock(pointer)
-//    }
-//    
-//    @inlinable
-//    borrowing package func tryLock() -> Bool {
-//        os_unfair_lock_trylock(pointer)
-//    }
-//    
-//    
-//}
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingStream.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncFlatMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncFilterSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncDropFirstSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncDropWhileSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncCompactMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncPrefixWhileSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncPrefixSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingFlatMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingFilterSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingDropWhileSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingCompactMapSequence.Iterator: TypedAsyncIteratorProtocol {}
+
+@available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+extension AsyncThrowingPrefixWhileSequence.Iterator: TypedAsyncIteratorProtocol {}

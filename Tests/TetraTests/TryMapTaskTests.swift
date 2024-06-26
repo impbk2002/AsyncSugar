@@ -39,13 +39,10 @@ final class TryMapTaskTests: XCTestCase {
         let target = try XCTUnwrap(input.randomElement())
         let ref = UnsafeCancellableHolder()
         let expect = expectation(description: "task cancellation")
-        let lock = NSRecursiveLock()
         let pub = TryMapTask(upstream: input.publisher) { value in
             if value == target {
                 await withUnsafeContinuation{ continuation in
-                    lock.withLock {
-                        ref.bag.removeAll()
-                    }
+                    ref.bag.removeAll()
                     continuation.resume()
                 }
                 XCTAssertTrue(Task.isCancelled)
@@ -56,13 +53,11 @@ final class TryMapTaskTests: XCTestCase {
                 expect.fulfill()
             }
         )
-        lock.withLock {
-            pub.sink { _ in
-                XCTFail()
-            } receiveValue: {
-                XCTAssertLessThanOrEqual($0, target)
-            }.store(in: &ref.bag)
-        }
+        pub.sink { _ in
+            XCTFail()
+        } receiveValue: {
+            XCTAssertLessThanOrEqual($0, target)
+        }.store(in: &ref.bag)
         wait(for: [expect], timeout: 0.5)
         
     }

@@ -8,6 +8,7 @@
 import Foundation
 import Dispatch
 import _Concurrency
+internal import CriticalSection
 
 @usableFromInline
 internal func randomDownloadFileURL() -> URL {

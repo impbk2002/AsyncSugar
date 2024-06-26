@@ -59,7 +59,7 @@ extension BackPort.AsyncPrefixSequence.Iterator: AsyncIteratorProtocol, TypedAsy
     public typealias Failure = Base.AsyncIterator.Err
     
     @inlinable
-    public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) -> Element? {
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
         if remaining != 0 {
             remaining &-= 1
             return try await baseIterator.next(isolation: actor)
@@ -68,6 +68,7 @@ extension BackPort.AsyncPrefixSequence.Iterator: AsyncIteratorProtocol, TypedAsy
         }
     }
     
+    @_disfavoredOverload
     @inlinable
     public mutating func next() async throws(Failure) -> Element? {
         try await next(isolation: nil)

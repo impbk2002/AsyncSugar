@@ -20,15 +20,13 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     @usableFromInline
     internal func _perform<T,Failure:Error>(_ body: () throws(Failure) -> T) async throws(Failure) -> T {
         let value:Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
-            let holder = ClosureHolder(closure: escapingClosure)
+            let block = ClosureHolder(closure: escapingClosure)
             defer {
-                withExtendedLifetime(holder, {})
+                withExtendedLifetime(block, {})
             }
             return await withUnsafeContinuation { continuation in
-                base.perform { [unowned holder, continuation] in
-                    nonisolated(unsafe)
-                    let result = wrapToResult(holder.closure)
-                    continuation.resume(returning: result)
+                base.perform { [unowned block, continuation] in
+                    continuation.resume(returning: block())
                 }
             }
         }
@@ -44,7 +42,7 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
                     withExtendedLifetime(block, {})
                 }
                 return try await base.perform{ [unowned block] in
-                    try block()
+                    try block().get()
                 }
             }
         } else {
@@ -149,7 +147,7 @@ extension TetraExtension where Base: NSManagedObjectContext {
                     withExtendedLifetime(block, {})
                 }
                 return try await base.perform(schedule: schedule.platformValue) { [unowned block] in
-                    return try block()
+                    return try block().get()
                 }
             }
         } else if schedule == .enqueued {
@@ -195,7 +193,7 @@ extension TetraExtension where Base: NSPersistentContainer {
                 let block = CoreDataContextClosureHolder(closure: $0)
                 defer { withExtendedLifetime(block, {}) }
                 return try await base.performBackgroundTask{ [unowned block] in
-                    try block($0)
+                    try block($0).get()
                 }
             }
         } else {

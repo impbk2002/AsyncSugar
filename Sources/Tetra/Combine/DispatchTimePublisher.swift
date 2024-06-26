@@ -8,6 +8,7 @@
 import Foundation
 import Dispatch
 import Combine
+internal import CriticalSection
 
 extension DispatchSource: TetraExtended {}
 

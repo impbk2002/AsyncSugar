@@ -7,6 +7,7 @@
 
 import Foundation
 @preconcurrency import Combine
+internal import CriticalSection
 
 @usableFromInline
 internal struct AsyncSubscriber<P:Publisher>: Sendable, Subscriber, Cancellable {

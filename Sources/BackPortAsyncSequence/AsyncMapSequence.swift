@@ -40,10 +40,7 @@ extension BackPort.AsyncMapSequence: AsyncSequence, TypedAsyncSequence {
     public typealias AsyncIterator = Iterator
     
     /// The iterator that produces elements of the map sequence.
-    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
-        
-        public typealias Element = Transformed
-        public typealias Failure = Base.AsyncIterator.Err
+    public struct Iterator {
         
         @usableFromInline
         var baseIterator: Base.AsyncIterator
@@ -62,35 +59,6 @@ extension BackPort.AsyncMapSequence: AsyncSequence, TypedAsyncSequence {
             self.baseIterator = baseIterator
             self.transform = transform
         }
-        
-        /// Produces the next element in the map sequence.
-        ///
-        /// This iterator calls `next()` on its base iterator; if this call returns
-        /// `nil`, `next()` returns `nil`. Otherwise, `next()` returns the result of
-        /// calling the transforming closure on the received element.
-        @inlinable
-        public mutating func next() async throws(Failure) -> Element? {
-            try await next(isolation: nil)
-        }
-        
-        /// Produces the next element in the map sequence.
-        ///
-        /// This iterator calls `next(isolation:)` on its base iterator; if this
-        /// call returns `nil`, `next(isolation:)` returns `nil`. Otherwise,
-        /// `next(isolation:)` returns the result of calling the transforming
-        /// closure on the received element.
-        @inlinable
-        public mutating func next(isolation actor: isolated (any Actor)?) async throws(Failure) ->  Element? {
-            guard !finished, let element = try await baseIterator.next(isolation: actor) else {
-                return nil
-            }
-            do {
-                return try await transform(element)
-            } catch {
-                finished = true
-                throw error
-            }
-        }
 
     }
     
@@ -98,6 +66,43 @@ extension BackPort.AsyncMapSequence: AsyncSequence, TypedAsyncSequence {
     public __consuming func makeAsyncIterator() -> Iterator {
         return Iterator(base.makeAsyncIterator(), transform: transform)
     }
+}
+
+extension BackPort.AsyncMapSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
+    
+    public typealias Element = Transformed
+    public typealias Failure = Base.AsyncIterator.Err
+    
+    /// Produces the next element in the map sequence.
+    ///
+    /// This iterator calls `next()` on its base iterator; if this call returns
+    /// `nil`, `next()` returns `nil`. Otherwise, `next()` returns the result of
+    /// calling the transforming closure on the received element.
+    @_disfavoredOverload
+    @inlinable
+    public mutating func next() async throws(Failure) -> Element? {
+        try await next(isolation: nil)
+    }
+    
+    /// Produces the next element in the map sequence.
+    ///
+    /// This iterator calls `next(isolation:)` on its base iterator; if this
+    /// call returns `nil`, `next(isolation:)` returns `nil`. Otherwise,
+    /// `next(isolation:)` returns the result of calling the transforming
+    /// closure on the received element.
+    @inlinable
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) ->  Element? {
+        guard !finished, let element = try await baseIterator.next(isolation: actor) else {
+            return nil
+        }
+        do {
+            return try await transform(element)
+        } catch {
+            finished = true
+            throw error
+        }
+    }
+    
 }
 
 extension BackPort.AsyncMapSequence: @unchecked Sendable
@@ -111,6 +116,7 @@ where Base.AsyncIterator: Sendable,
       Transformed: Sendable { }
 
 extension BackPort.AsyncMapSequence {
+    
     
     @inlinable
     package init <Source:AsyncSequence, Failure:Error>(

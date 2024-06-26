@@ -7,6 +7,7 @@
 
 @preconcurrency import Foundation
 import Dispatch
+internal import CriticalSection
 
 extension Task: TetraExtended {}
 
@@ -18,9 +19,9 @@ public extension TetraExtension where Base == Task<Never,Never> {
         - Throws: `CancellationError` if task is cancelled
      */
     @inlinable
-    static func sleep(deadline: DispatchTime, tolerance: DispatchTimeInterval? = nil) async throws {
+    static func sleep(deadline: DispatchTime, tolerance: DispatchTimeInterval? = nil) async throws(CancellationError) {
         let source = DispatchSource.makeTimerSource(flags: [.strict])
-        
+        defer { source.cancel() }
         source.schedule(deadline: deadline, repeating: .never, leeway: tolerance ?? .nanoseconds(0))
         try await dispatchTimerSleep(source: source)
     }
@@ -31,8 +32,9 @@ public extension TetraExtension where Base == Task<Never,Never> {
         - Throws: `CancellationError` if task is cancelled
      */
     @inlinable
-    static func sleep(wallDeadline: DispatchWallTime, tolerance: DispatchTimeInterval? = nil) async throws {
+    static func sleep(wallDeadline: DispatchWallTime, tolerance: DispatchTimeInterval? = nil) async throws(CancellationError) {
         let source = DispatchSource.makeTimerSource(flags: [.strict])
+        defer { source.cancel() }
         source.schedule(wallDeadline: wallDeadline, repeating: .never, leeway: tolerance ?? .nanoseconds(0))
         try await dispatchTimerSleep(source: source)
     }
@@ -41,7 +43,7 @@ public extension TetraExtension where Base == Task<Never,Never> {
 
 
 @usableFromInline
-internal func dispatchTimerSleep(source:DispatchSourceTimer) async throws {
+internal func dispatchTimerSleep(source:DispatchSourceTimer) async throws(CancellationError) {
     
     let lock = createCheckedStateLock(checkedState: DispatchSleepState.waiting)
     source.setEventHandler{
@@ -54,37 +56,40 @@ internal func dispatchTimerSleep(source:DispatchSourceTimer) async throws {
             $0.take()
         }?.resume(throwing: CancellationError())
     }
-    return try await withTaskCancellationHandler {
-        return try await withUnsafeThrowingContinuation{ continuation in
-            let snapShot = lock.withLock{
-                let oldValue = $0
-                switch oldValue {
-                case .finished:
-                    break
-                case .waiting, .continuation:
-                    $0 = .continuation(continuation)
-                    
+    do {
+        try await withTaskCancellationHandler {
+            return try await withUnsafeThrowingContinuation{ continuation in
+                let snapShot = lock.withLock{
+                    let oldValue = $0
+                    switch oldValue {
+                    case .finished:
+                        break
+                    case .waiting, .continuation:
+                        $0 = .continuation(continuation)
+                        
+                    }
+                    return oldValue
                 }
-                return oldValue
+                switch snapShot {
+                case .continuation(let unsafeContinuation):
+                    assertionFailure("reached unexpected state")
+                    unsafeContinuation.resume(throwing: CancellationError())
+                case .finished:
+                    continuation.resume(throwing: CancellationError())
+                case .waiting:
+                    break
+                }
+                source.activate()
             }
-            switch snapShot {
-            case .continuation(let unsafeContinuation):
-                assertionFailure("reached unexpected state")
-                unsafeContinuation.resume(throwing: CancellationError())
-            case .finished:
-                continuation.resume(throwing: CancellationError())
-            case .waiting:
-                break
-            }
-            source.activate()
+        } onCancel: {
+            lock.withLock{
+                $0.take()
+            }?.resume(throwing: CancellationError())
+            source.cancel()
         }
-    } onCancel: {
-        lock.withLock{
-            $0.take()
-        }?.resume(throwing: CancellationError())
-        source.cancel()
+    } catch {
+        throw CancellationError()
     }
-
 }
 
 
