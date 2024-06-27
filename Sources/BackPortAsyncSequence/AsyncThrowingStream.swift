@@ -74,11 +74,4 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
 extension AsyncTypedThrowingStream: Sendable where Element: Sendable {}
 
 
-extension AsyncThrowingStream {
-    
-    func bridge() -> some TypedAsyncSequence<Element, Failure> {
-        AsyncTypedThrowingStream(base: self)
-    }
-    
-}
 

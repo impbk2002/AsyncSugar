@@ -29,7 +29,7 @@ public extension Binding where Value: MutableCollection {
 @available(macCatalyst, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(tvOS, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
 @available(iOS, deprecated: 15.0, message: "use Binding<MutableCollection> itself as Collection")
-public struct BindingCollection<T:MutableCollection>: Collection, Sendable {
+public struct BindingCollection<T:MutableCollection>: Collection {
     
     @usableFromInline
     @Binding var collection:T
@@ -45,9 +45,9 @@ public struct BindingCollection<T:MutableCollection>: Collection, Sendable {
         } else {
             nonisolated(unsafe)
             let index = consume position
-            return .init {
+            return .init { [binding] in
                 binding.wrappedValue[index]
-            } set: { newValue, transaction in
+            } set: { [binding] newValue, transaction in
                 withTransaction(transaction) {
                     binding.wrappedValue[index] = newValue
                 }

@@ -67,13 +67,22 @@ public struct MapTask<Upstream:Publisher, Output>: Publisher where Upstream.Outp
 
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         
-        let processor = Inner(subscriber: subscriber, transform: transform)
-        let task = Task(priority: priority, operation: processor.run)
-        processor.resumeCondition(task)
-        upstream.subscribe(processor)
+//        let processor = Inner(subscriber: subscriber, transform: transform)
+//        let task = Task(priority: priority, operation: processor.run)
+//        processor.resumeCondition(task)
+//        upstream.subscribe(processor)
+        MultiMapTask(
+            priority: priority,
+            maxTasks: .max(1),
+            upstream: upstream,
+            transform: { [transform] value throws(Failure) in
+                try await transform(consume value).get()
+            })
+        .subscribe(MapTaskInner(description: "MapTask", downstream: subscriber))
     }
     
 }
+
 
 extension MapTask: Sendable where Upstream: Sendable {}
 
@@ -121,11 +130,12 @@ extension MapTask {
                 }
                 return (old, effect, taskEffect)
             }
-            effect?.run()
+            // tell compiler we hope to remove these objects as soon as possible
+            (consume effect)?.run()
             if let completion {
-                subscriber?.receive(completion: completion)
+                (consume subscriber)?.receive(completion: completion)
             }
-            taskEffect?.run()
+            (consume taskEffect)?.run()
         }
         
         private func send(_ value:Output) throws {

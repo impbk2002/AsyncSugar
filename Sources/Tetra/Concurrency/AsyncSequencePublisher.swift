@@ -9,38 +9,49 @@ import Foundation
 @preconcurrency import Combine
 public import BackPortAsyncSequence
 internal import CriticalSection
-
-public extension AsyncSequence  {
-    
-    @inlinable
-    var tetra:TetraExtension<Self> {
-        .init(self)
-    }
-    
-}
+import Namespace
 
 public extension TetraExtension where Base: AsyncSequence {
     
+    @available(*, deprecated, renamed: "toPublisher()", message: "use toPublisher() which provides task priority and isolation")
+    var publisher:some Publisher<Base.Element, any Error> {
+        toPublisher()
+    }
+    
+    
     @_disfavoredOverload
     @inlinable
-    var publisher:some Publisher<Base.Element, any Error> {
-        AsyncSequencePublisher(base: LegacyTypedAsyncSequence(base: base))
+    func toPublisher(
+        barrier: (any Actor)? = #isolation,
+        priority: TaskPriority? = nil
+    ) -> some Publisher<Base.Element, any Error> {
+        AsyncSequencePublisher(
+            base: LegacyTypedAsyncSequence(base: base),
+            barrier: barrier,
+            priority: priority
+        )
     }
     
 }
 
-public extension TetraExtension where Base: AsyncSequence, Base.AsyncIterator: TypedAsyncIteratorProtocol {
+public extension TetraExtension where Base: TypedAsyncSequence, Base.AsyncIterator: TypedAsyncIteratorProtocol {
     
     @inlinable
-    var publisher:some Publisher<Base.Element, Base.AsyncIterator.Err> {
-        AsyncSequencePublisher(base: base)
+    func toPublisher<Element,Failure:Error>(
+        barrier: (any Actor)? = #isolation,
+        priority: TaskPriority? = nil
+    ) -> some Publisher<Element, Failure> where Element == Base.Element, Failure == Base.AsyncIterator.Err {
+        AsyncSequencePublisher(
+            base: base,
+            barrier: barrier,
+            priority: priority
+        )
     }
     
 }
 
 
 public struct AsyncSequencePublisher<Base: AsyncSequence>: Publisher where Base.AsyncIterator: TypedAsyncIteratorProtocol {
-    
     public typealias Output = Base.AsyncIterator.Element
     
     public typealias Failure = Base.AsyncIterator.Err

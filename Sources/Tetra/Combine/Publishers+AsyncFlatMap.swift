@@ -17,13 +17,18 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
     typealias Failure = Upstream.Failure
     typealias Transform = @Sendable (Upstream.Output) async throws(Failure) -> sending Segment
     var priority: TaskPriority? = nil
+    let taskExecutor: (any Executor)?
     var maxTasks:Subscribers.Demand
     let upstream:Upstream
     let transform:Transform
     
     func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Segment.Element == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
-        let task = Task(priority: priority, operation: processor.run)
+        let task = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *), let executor = taskExecutor as? (any TaskExecutor) {
+            Task(executorPreference: executor, priority: priority, operation: processor.run)
+        } else {
+            Task(priority: priority, operation: processor.run)
+        }
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
@@ -39,6 +44,7 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
+        self.taskExecutor = nil
     }
     
     @usableFromInline
@@ -52,14 +58,16 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = { (value) throws(Failure) in
-            .init(base: try await transform(value))
+            try await .init(base: transform(value))
         }
+        self.taskExecutor = nil
     }
 
     @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
     @usableFromInline
     init<Source>(
         priority: TaskPriority? = nil,
+        taskExecutor: (any TaskExecutor)? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
         typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(Failure) -> sending Source
@@ -68,8 +76,9 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = { (value) throws(Failure) in
-            .init(base: try await typedTransform(value))
+            try await .init(base: typedTransform(value))
         }
+        self.taskExecutor = taskExecutor
     }
 
     
@@ -139,7 +148,7 @@ extension AsyncFlatMap {
                     await localTask(isolation: barrier, group: &group)
                 }
             }
-            send(completion: .finished)
+            send(completion: .finished, shouldCancel: false)
 
         }
         
@@ -178,7 +187,7 @@ extension AsyncFlatMap {
                 let effect = $0.upstreamSubscription.transition(.resume(subscription))
                 return (effect, requestValue)
             }
-            effect?.run()
+            (consume effect)?.run()
             if requestValue && maxTasks > .none {
                 subscription.request(maxTasks)
             }
@@ -191,13 +200,13 @@ extension AsyncFlatMap {
         }
         
         func cancel() {
-            send(completion: nil)
+            send(completion: nil, shouldCancel: true)
         }
         
         // almost uncontented call
         private func handleDownStream(
             isolation actor: isolated some Actor,
-            event: Result<Suppress<Output>?, EitherFailure<Failure, Failure>>
+            event: Result<Suppress<Output>?, Failure>
         ) async {
             switch event {
             case .success(.none):
@@ -227,7 +236,7 @@ extension AsyncFlatMap {
                 )
                 return
             case .failure(let failure):
-                send(completion: .failure(failure))
+                send(completion: .failure(failure), shouldCancel: true)
                 return
             }
             return
@@ -235,16 +244,10 @@ extension AsyncFlatMap {
         
         // almost uncontented call
         private func send(
-            completion: Subscribers.Completion<EitherFailure<Failure, Failure>>?
+            completion: Subscribers.Completion<Failure>?,
+            shouldCancel:Bool
         ) {
             valueSource.continuation.finish()
-            let shouldCancel:Bool
-            switch completion {
-            case .none, .failure(.second(_)):
-                shouldCancel = true
-            case .failure(.first(_)), .finished:
-                shouldCancel = false
-            }
             let (subscriber, effect, interruption, taskEffect) = lock.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
@@ -261,17 +264,13 @@ extension AsyncFlatMap {
                 }
                 return (old, effect, interruption, taskEffect)
             }
-            effect?.run()
-            interruption?.run()
-            switch completion {
-            case .finished:
-                subscriber?.receive(completion: .finished)
-            case .failure(.first(let error)), .failure(.second(let error)):
-                subscriber?.receive(completion: .failure(error))
-            case nil:
-                break
+            // ensure compiler it is good to destroy the objects
+            (consume effect)?.run()
+            (consume interruption)?.run()
+            (consume taskEffect)?.run()
+            if let completion {
+                (consume subscriber)?.receive(completion: completion)
             }
-            taskEffect?.run()
         }
         
         // almost uncontented call
@@ -379,7 +378,7 @@ extension AsyncFlatMap {
                 await handleDownStream(isolation: barrier, event: .success(.none))
                 return false
             case .failure(let error):
-                await handleDownStream(isolation: barrier, event: .failure(.second(error)))
+                await handleDownStream(isolation: barrier, event: .failure(error))
                 return false
             case .success(let value):
                 await handleDownStream(isolation: barrier, event: .success(.init(value: value)))
@@ -398,10 +397,10 @@ extension AsyncFlatMap {
                 }
                 switch result {
                 case .failure(let failure):
-                    await handleDownStream(
-                        isolation: barrier,
-                        event: .failure(.first(failure))
-                    )
+                    let block = { (actor: isolated (any Actor)?) in
+                        send(completion: .failure(failure), shouldCancel: false)
+                    }
+                    await block(barrier)
                     return
                 case .success(let value):
                     let isSuccess = group.addTaskUnlessCancelled(priority: nil) {
@@ -412,7 +411,7 @@ extension AsyncFlatMap {
                             await barrier.markDone()
                             await handleDownStream(
                                 isolation: barrier,
-                                event: .failure(.second(failure))
+                                event: .failure(failure)
                             )
                             return
                         case .success(let source):

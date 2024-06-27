@@ -10,6 +10,7 @@ import XCTest
 @testable import Tetra
 import Combine
 import BackPortAsyncSequence
+import Namespace
 
 class AsyncSequencePublisherTests: XCTestCase {
     
@@ -24,7 +25,7 @@ class AsyncSequencePublisherTests: XCTestCase {
             continuation.finish()
         }
         let cancellable = AsyncTypedStream(base: stream)
-            .tetra.publisher
+            .tetra.toPublisher()
             .catch{ _ in
                 XCTFail()
                 return Empty<Int, Never>()

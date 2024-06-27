@@ -202,21 +202,19 @@ public final class RunLoopScheduler: Scheduler, @unchecked Sendable, Hashable {
     nonisolated
     public var minimumTolerance: SchedulerTimeType.Stride { 0.0 }
     
-    public func scheduleTask<T>(_ block: @escaping () throws -> T) async rethrows -> T {
-        let result:Result<T,Error> = await withUnsafeContinuation{ continuation in
+    public func scheduleTask<T, Failure:Error>(_ block: @escaping () throws(Failure) -> T) async throws(Failure) -> T {
+        let result:Result<T,Failure> = await withUnsafeContinuation{ continuation in
             CFRunLoopPerformBlock(cfRunLoop, CFRunLoopMode.commonModes.rawValue) {
-                continuation.resume(returning: .init(catching: { try block() }))
+                let result = Result<T,Failure> { () throws(Failure) in
+                    return try block()
+                }
+                continuation.resume(returning: result)
             }
             if CFRunLoopIsWaiting(cfRunLoop) {
                 CFRunLoopWakeUp(cfRunLoop)
             }
         }
-        switch result {
-        case .success(let success):
-            return success
-        case .failure:
-            try result._rethrowOrFail()
-        }
+        return try result.get()
     }
     
     @usableFromInline

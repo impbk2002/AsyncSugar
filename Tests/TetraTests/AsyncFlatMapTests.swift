@@ -24,17 +24,18 @@ final class AsyncFlatMapTests: XCTestCase {
                 }
             )
             .asyncFlatMap(maxTasks: .max(1)) { value in
-                let base = AsyncTypedStream(base: AsyncStream<Int>{ continuation in
+                return AsyncStream<Int>{ continuation in
                     sample.forEach{
                         continuation.yield($0)
                     }
                     continuation.finish()
-                })
-                return BackPort.AsyncMapSequence(base, transform: {
-                    await Task.yield()
-                    return $0
-                })
-            }.handleEvents(
+                }.tetra.bridge()
+                    .tetra.map{
+                        await Task.yield()
+                        return $0
+                    }
+            }
+            .handleEvents(
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }

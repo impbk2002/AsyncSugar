@@ -60,44 +60,16 @@ public struct TryMapTask<Upstream:Publisher, Output>: Publisher where Upstream.O
             maxTasks: .max(1),
             upstream: upstream.mapError{ $0 as any Error },
             transform: transform
-        ).subscribe(TryMapTaskInner(downstream: subscriber, upstream: nil))
+        ).subscribe(MapTaskInner(
+            description: "TryMapTask",
+            downstream: subscriber,
+            upstream: nil
+        ))
         
     }
 
 }
 
-struct TryMapTaskInner<S:Subscriber>: Subscription, Subscriber, CustomStringConvertible, CustomPlaygroundDisplayConvertible {
-    
-    var description: String { "TryMapTask" }
-    
-    var playgroundDescription: Any { description }
-    
-    var downstream:S
-    var upstream:Subscription? = nil
-    var combineIdentifier: CombineIdentifier { downstream.combineIdentifier }
-    
-    func receive(_ input: S.Input) -> Subscribers.Demand {
-        downstream.receive(input)
-    }
-    
-    func receive(subscription: any Subscription) {
-        let newSubscription = Self(downstream: downstream, upstream: subscription)
-        downstream.receive(subscription: newSubscription)
-    }
-    
-    func receive(completion: Subscribers.Completion<S.Failure>) {
-        downstream.receive(completion: completion)
-    }
-    
-    func request(_ demand: Subscribers.Demand) {
-        upstream?.request(demand)
-    }
-    
-    func cancel() {
-        upstream?.cancel()
-    }
-    
-}
 
 extension TryMapTask: Sendable where Upstream: Sendable {}
 
@@ -145,11 +117,11 @@ extension TryMapTask {
                 }
                 return (old, effect, taskEffect)
             }
-            effect?.run()
+            (consume effect)?.run()
             if let completion {
-                subscriber?.receive(completion: completion)
+                (consume subscriber)?.receive(completion: completion)
             }
-            taskEffect?.run()
+            (consume taskEffect)?.run()
         }
         
         private func send(_ value:Output) throws {

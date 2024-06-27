@@ -9,6 +9,7 @@ import XCTest
 #if canImport(CoreData)
 import CoreData
 @testable import Tetra
+internal import NamespaceExtension
 
 final class NSManagedObjectContextTests: XCTestCase {
 

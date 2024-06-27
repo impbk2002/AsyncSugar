@@ -8,8 +8,8 @@
 @preconcurrency import Foundation
 import Dispatch
 internal import CriticalSection
+import Namespace
 
-extension Task: TetraExtended {}
 
 public extension TetraExtension where Base == Task<Never,Never> {
     

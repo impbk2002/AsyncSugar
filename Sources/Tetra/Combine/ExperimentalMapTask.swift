@@ -132,7 +132,7 @@ extension MultiMapTask {
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
-                        let result = await wrapToResult(success, transform)
+                        let result = await wrapToResult(consume success, transform)
                         switch result {
                         case .failure(let error):
                             await barrier.markDone()
@@ -175,10 +175,8 @@ extension MultiMapTask {
                 }
                 return (old, taskEffect)
             }
-            if let subscriber {
-                subscriber.receive(completion: completion)
-            }
-            taskEffect?.run()
+            (consume subscriber)?.receive(completion: completion)
+            (consume taskEffect)?.run()
         }
         
         

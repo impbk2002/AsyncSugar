@@ -34,6 +34,21 @@ let package = Package(
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
+            name: "Namespace",
+            swiftSettings: [
+                .swiftLanguageVersion(.v6)
+            ]
+        ),
+        .target(
+            name: "NamespaceExtension",
+            dependencies: [
+                "Namespace",
+            ],
+            swiftSettings: [
+                .swiftLanguageVersion(.v6)
+            ]
+        ),
+        .target(
             name: "CriticalSection",
             dependencies: [
                 .product(name: "Atomics", package: "swift-atomics")
@@ -47,6 +62,9 @@ let package = Package(
         ),
         .target(
             name: "BackportDiscardingTaskGroup",
+            dependencies: [
+                "Namespace",
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("FullTypedThrows"),
                 .enableExperimentalFeature("IsolatedAny"),
@@ -60,6 +78,8 @@ let package = Package(
                 "BackPortAsyncSequence",
                 "CriticalSection",
                 "BackportDiscardingTaskGroup",
+                "Namespace",
+                "NamespaceExtension"
             ],
             swiftSettings: [
                 .enableUpcomingFeature("FullTypedThrows"),
@@ -69,7 +89,7 @@ let package = Package(
         ),
         .target(
             name: "BackPortAsyncSequence",
-            dependencies: [],
+            dependencies: [ "Namespace"],
             swiftSettings: [
                 .swiftLanguageVersion(.v6),
             ]

@@ -7,6 +7,7 @@
 
 import XCTest
 @testable import Tetra
+import Namespace
 
 final class URLSessionDownloadTests: XCTestCase {
     

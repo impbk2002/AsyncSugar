@@ -12,7 +12,7 @@ struct JsonSample1Model: Codable, Hashable {
     
     var imaging:[LocationItem]
     var labs:[LocationItem]
-    
+    var medications:[Medical]
     
     
     struct LocationItem: Codable, Hashable {
@@ -34,7 +34,7 @@ struct JsonSample1Model: Codable, Hashable {
         
         struct MetaData: Codable, Hashable {
             
-            var does:String
+            var dose:String
             var name:String
             var pillCount:String
             var refills:String

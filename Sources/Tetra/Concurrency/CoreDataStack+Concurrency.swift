@@ -10,10 +10,9 @@ import _Concurrency
 
 #if canImport(CoreData)
 import CoreData
+import Namespace
 
-extension NSPersistentContainer: TetraExtended {}
-extension NSPersistentStoreCoordinator: TetraExtended {}
-extension NSManagedObjectContext: TetraExtended {}
+
 
 extension TetraExtension where Base: NSPersistentStoreCoordinator {
     

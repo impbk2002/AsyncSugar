@@ -9,10 +9,10 @@
 import Foundation
 import _Concurrency
 internal import BackPortAsyncSequence
+import Namespace
 
 public import CriticalSection
 
-extension NotificationCenter: TetraExtended {}
 
 extension TetraExtension where Base: NotificationCenter {
     

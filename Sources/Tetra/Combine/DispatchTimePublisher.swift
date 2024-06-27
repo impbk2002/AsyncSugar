@@ -9,8 +9,8 @@ import Foundation
 import Dispatch
 import Combine
 internal import CriticalSection
+import Namespace
 
-extension DispatchSource: TetraExtended {}
 
 public extension TetraExtension where Base:DispatchSource {
     
