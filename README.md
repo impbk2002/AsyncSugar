@@ -71,13 +71,16 @@ import Combine
         
         let cancellable = (0..<20).publisher
             .setFailureType(to: URLError.self)
-            .multiMapTask(maxTasks: .unlimited) { _ in
+            .multiMapTask(maxTasks: .unlimited) { _ throws(URLError) in
+                
                 // Underlying Task is cancelled if subscription is cancelled before task completes.
                 do {
                     let (data, response) = try await URLSession.shared.data(from: URL(string: "https://google.com")!)
-                    return .success(data) as Result<Data,URLError>
+                    // below unsafe cancel is no-op, throw appropriate error to interrupt combine pipeline
+                    // withUnsafeCurrentTask { $0?.cancel() }
+                    return data
                 } catch {
-                    return .failure(error as! URLError) as Result<Data,URLError>
+                    throw (error as! URLError)
                 }
             }.sink { completion in
                 
@@ -101,8 +104,7 @@ import Tetra
             continuation.yield(1)
             continuation.finish()
             // Underlying AsyncIterator and Task receive task cancellation if subscription is cancelled.
-        }.tetra.publisher
-            .catch{ _ in Empty().setFailureType(to: Never.self) }
+        }.tetra.bridge.tetra.publisher
             .sink { number in
                 
             }
