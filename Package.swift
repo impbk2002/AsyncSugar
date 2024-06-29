@@ -25,10 +25,10 @@ let package = Package(
         // .package(url: /* package url */, from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-collections.git", .upToNextMajor(from: "1.1.0")),
         .package(
-          url: "https://github.com/apple/swift-atomics.git",
-          .upToNextMajor(from: "1.2.0") // or `.upToNextMinor
+            url: "https://github.com/apple/swift-atomics.git",
+            .upToNextMajor(from: "1.2.0") // or `.upToNextMinor
         ),
-
+        
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -48,10 +48,18 @@ let package = Package(
                 .swiftLanguageVersion(.v6)
             ]
         ),
+        .testTarget(name: "RunLoopExecutorTest",
+                    
+                    dependencies: [
+                        "CriticalSection"
+                    ]
+                   ),
         .target(
             name: "CriticalSection",
             dependencies: [
-                .product(name: "Atomics", package: "swift-atomics")
+                .product(name: "Atomics", package: "swift-atomics"),
+                .product(name: "HeapModule", package: "swift-collections"),
+                
             ],
             swiftSettings: [
                 .swiftLanguageVersion(.v6),
@@ -60,6 +68,7 @@ let package = Package(
                 .enableExperimentalFeature("BuiltinModule")
             ]
         ),
+
         .target(
             name: "BackportDiscardingTaskGroup",
             dependencies: [
