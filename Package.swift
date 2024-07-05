@@ -48,27 +48,19 @@ let package = Package(
                 .swiftLanguageVersion(.v6)
             ]
         ),
-        .testTarget(name: "RunLoopExecutorTest",
-                    
-                    dependencies: [
-                        "CriticalSection"
-                    ]
-                   ),
         .target(
             name: "CriticalSection",
             dependencies: [
                 .product(name: "Atomics", package: "swift-atomics"),
-                .product(name: "HeapModule", package: "swift-collections"),
                 
             ],
             swiftSettings: [
                 .swiftLanguageVersion(.v6),
                 .enableExperimentalFeature("StaticExclusiveOnly"),
                 .enableExperimentalFeature("RawLayout"),
-                .enableExperimentalFeature("BuiltinModule")
+                .enableExperimentalFeature("BuiltinModule"),
             ]
         ),
-
         .target(
             name: "BackportDiscardingTaskGroup",
             dependencies: [
@@ -84,6 +76,8 @@ let package = Package(
             name: "Tetra",
             dependencies: [
                 .product(name: "DequeModule", package: "swift-collections"),
+                .product(name: "HeapModule", package: "swift-collections"),
+
                 "BackPortAsyncSequence",
                 "CriticalSection",
                 "BackportDiscardingTaskGroup",
