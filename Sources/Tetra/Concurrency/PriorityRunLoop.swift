@@ -10,63 +10,200 @@ import Foundation
 import CoreFoundation
 public import CriticalSection
 
-public final class RunLoopPriorityExecutor {
+@usableFromInline
+struct RunLoopPriorityQueue: ~Copyable, Sendable {
     
     @usableFromInline
     internal let heaps: some UnfairStateLock<Heap<JobBlock>> = createCheckedStateLock(checkedState: .init())
+   
+    @usableFromInline
+    nonisolated(unsafe)
+    internal let runLoop:CFRunLoop
     
+    @usableFromInline
+    nonisolated(unsafe)
+    internal let source:CFRunLoopSource
+    
+    @usableFromInline
+    internal let isMain:Bool
+    
+    nonisolated(unsafe)
+    internal let thread:pthread_t
+    
+    @usableFromInline
+    init(
+        runLoop: RunLoop,
+        threadId: pthread_t,
+        execute: @escaping (consuming UnownedJob) -> Void
+    ) {
+        self.runLoop = runLoop.getCFRunLoop()
+        self.thread = threadId
+        self.isMain = CFEqual(runLoop, CFRunLoopGetMain())
+        if isMain {
+            self.source = CFRunLoopSourceCreate(nil, 0, nil)
+            CFRunLoopSourceInvalidate(source)
+        } else {
+            self.source = RunLoopSourceCreateWithHandler { [heaps] in
+                
+                guard $0 == .perform else { return }
+                
+                var queue = heaps.withLock{
+                    var next = Heap<JobBlock>()
+                    swap(&next, &$0)
+                    return next
+                }
+                while let block = queue.popMax() {
+                    defer {
+                        if let ref = block.token {
+                            pthread_override_qos_class_end_np(ref)
+                        }
+                    }
+                    let job = block.jobImp
+                    execute(job)
+                }
+            }
+            CFRunLoopAddSource(self.runLoop, source, .commonModes)
+        }
+    }
+    
+    @inlinable
+    deinit {
+        if isMain {
+            return
+        }
+        CFRunLoopSourceInvalidate(source)
+        if CFRunLoopCopyCurrentMode(runLoop) != nil{
+            var arrays = CFRunLoopCopyAllModes(runLoop) as! [CFString]
+            arrays.append(CFRunLoopMode.commonModes.rawValue)
+            let timer = CFRunLoopTimerCreate(nil, CFAbsoluteTimeGetCurrent(), 0, 0, 0, nil, nil)
+            arrays.forEach{
+                CFRunLoopAddTimer(runLoop, timer, .init($0))
+            }
+        } else {
+            CFRunLoopWakeUp(runLoop)
+        }
+        heaps.withLock{
+            precondition($0.count == 0)
+        }
+    }
+    
+    @usableFromInline
+    internal func evaluateCommonModes() -> [CFRunLoopMode] {
+        var arrys = [CFRunLoopMode]()
+        withUnsafeMutablePointer(to: &arrys) { ptr in
+            var context = CFRunLoopSourceContext()
+            context.info = .init(ptr)
+            context.schedule = { info, _ , mode in
+                let arrayPtr = info!.assumingMemoryBound(to: [CFRunLoopMode].self)
+                arrayPtr.pointee.append(mode!)
+            }
+            let emptySource = CFRunLoopSourceCreate(nil, 0, &context)!
+            CFRunLoopAddSource(runLoop, emptySource, .commonModes)
+            CFRunLoopSourceInvalidate(source)
+        }
+        return arrys
+    }
+    
+    
+    @usableFromInline
+    nonisolated
+    internal func schedule(_ job: consuming UnownedJob) {
+        if isMain {
+            MainActor.shared.enqueue(job)
+            return
+        }
+
+        let override: pthread_override_t?
+        
+        if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
+            let qos = job.priority.evaluateQos()
+            if qos.qosClass == .unspecified {
+                override = nil
+            } else {
+                override = pthread_override_qos_class_start_np(thread, qos.qosClass.rawValue, Int32(qos.relativePriority))
+            }
+        } else {
+            override = nil
+        }
+        
+        
+        heaps.withLockUnchecked{ [job] in
+            // lastest has the lower id which results lower priority
+            let id = -$0.count
+            var item = JobBlock(id: id, jobRef: consume job)
+            item.token = override
+            $0.insert(item)
+        }
+        CFRunLoopSourceSignal(source)
+    }
+    
+    @inlinable
+    nonisolated
+    internal func add(_ mode:CFRunLoopMode) {
+        if isMain {
+            return
+        }
+        CFRunLoopAddSource(runLoop, source, mode)
+    }
+    
+    // you can not remove common mode
+    @inlinable
+    nonisolated
+    internal func remove(_ mode:CFRunLoopMode) {
+        if isMain {
+            return
+        }
+        if mode == .commonModes || mode == .defaultMode || evaluateCommonModes().contains(mode) {
+            return
+        }
+        CFRunLoopRemoveSource(runLoop, source, mode)
+    }
+    
+}
+
+
+public final class RunLoopPriorityExecutor {
+    
+
     // cache for faster comparsion, RunLoop comparsion trigger creating extra RunLoop
     // I'm not sure storing pthread_t as bitpattern is a good idea
     @usableFromInline
     let threadId:Int
     
     @usableFromInline
-    nonisolated(unsafe)
-    internal let looper:RunLoop
-   
-    @usableFromInline
-    internal var cfRef:CFRunLoop {
-        looper.getCFRunLoop()
-    }
+    internal let queue:RunLoopPriorityQueue
     
     @usableFromInline
     nonisolated(unsafe)
-    internal let source:CFRunLoopSource
-    
+    internal let _runLoop:RunLoop
 
     @inlinable
     internal init() {
-        
-        let (buffer, source) = Self.sharedSource
-        self.looper = .current
+        self._runLoop = .current
+        var serialRef: UnownedSerialExecutor! = nil
         self.threadId = .init(bitPattern: pthread_self())
-        self.source = source
-        buffer.header = .init(value: self)
-        if Thread.isMainThread {
-            CFRunLoopSourceInvalidate(source)
-            return
+        if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
+            var taskRef:UnownedTaskExecutor! = nil
+            self.queue = RunLoopPriorityQueue(runLoop: .current, threadId: pthread_self()) {
+                $0.runSynchronously(isolatedTo: serialRef, taskExecutor: taskRef)
+            }
+            taskRef = asUnownedTaskExecutor()
         } else {
-            CFRunLoopAddSource(cfRef, source, .commonModes)
+            self.queue = RunLoopPriorityQueue(runLoop: .current, threadId: pthread_self()) {
+                $0.runSynchronously(on: serialRef)
+            }
         }
+        serialRef = asUnownedSerialExecutor()
+
     }
     
     @inlinable
     deinit {
-        let key = ObjectIdentifier(looper)
+        let key = ObjectIdentifier(queue.runLoop)
         let _ = Self.cache.withLockUnchecked{
             $0.removeValue(forKey: key)
         }
-        CFRunLoopSourceInvalidate(source)
-        if inRunLoop, looper.currentMode != nil {
-            var arrays = CFRunLoopCopyAllModes(looper.getCFRunLoop()) as! [CFString]
-            arrays.append(CFRunLoopMode.commonModes.rawValue)
-            let timer = CFRunLoopTimerCreate(nil, CFAbsoluteTimeGetCurrent(), 0, 0, 0, nil, nil)
-            arrays.forEach{
-                CFRunLoopAddTimer(cfRef, timer, .init($0))
-            }
-        } else {
-            CFRunLoopWakeUp(looper.getCFRunLoop())
-        }
+
 
     }
     
@@ -84,64 +221,25 @@ public final class RunLoopPriorityExecutor {
     @inlinable
     public var runLoop: RunLoop {
         assert(inRunLoop, "can not access \(#function) outside of isolation")
-        return looper
+        return _runLoop
     }
-    
-    @usableFromInline
-    nonisolated
-    internal func schedule(_ job: consuming UnownedJob) {
-        if CFEqual(cfRef, CFRunLoopGetMain()) {
-            MainActor.shared.enqueue(job)
-            return
-        }
-        heaps.withLock{ [job] in
-            // lastest has the lower id which results lower priority
-            let id = -$0.count
-            $0.insert(.init(id: id, jobRef: consume job))
-        }
-        CFRunLoopSourceSignal(source)
-        if !inRunLoop {
-            CFRunLoopWakeUp(cfRef)
-        }
-    }
-    
-    @usableFromInline
-    internal func evaluateCommonModes() -> [RunLoop.Mode] {
-        var arrys = [String]()
-        withUnsafeMutablePointer(to: &arrys) { ptr in
-            var context = CFRunLoopSourceContext()
-            context.info = .init(ptr)
-            context.schedule = { info, _ , mode in
-                let arrayPtr = info!.assumingMemoryBound(to: [String].self)
-                arrayPtr.pointee.append(mode!.rawValue as String)
-            }
-            let emptySource = CFRunLoopSourceCreate(nil, 0, &context)!
-            CFRunLoopAddSource(cfRef, emptySource, .commonModes)
-            CFRunLoopSourceInvalidate(source)
-        }
-        return arrys.map{ RunLoop.Mode($0) }
-    }
-    
+
     @inlinable
     nonisolated
     public func add(_ mode:RunLoop.Mode) {
-        if CFEqual(cfRef, CFRunLoopGetMain()) {
-            return
-        }
-        CFRunLoopAddSource(cfRef, source, .init(mode.rawValue as CFString))
+        queue.add(.init(mode.rawValue as CFString))
     }
     
     // you can not remove common mode
     @inlinable
     nonisolated
     public func remove(_ mode:RunLoop.Mode) {
-        if CFEqual(cfRef, CFRunLoopGetMain()) {
-            return
-        }
-        if mode == .common || mode == .default || evaluateCommonModes().contains(mode) {
-            return
-        }
-        CFRunLoopRemoveSource(cfRef, source, .init(mode.rawValue as CFString))
+        queue.remove(.init(mode.rawValue as CFString))
+    }
+    
+    @usableFromInline
+    internal var source:CFRunLoopSource {
+        queue.source
     }
     
 }
@@ -151,13 +249,13 @@ extension RunLoopPriorityExecutor: SerialExecutor {
     @inlinable
     nonisolated
     public func isSameExclusiveExecutionContext(other: borrowing RunLoopPriorityExecutor) -> Bool {
-        return CFEqual(cfRef, other.cfRef)
+        return CFEqual(queue.runLoop, other.queue.runLoop)
     }
     
     @inlinable
     nonisolated
     public func asUnownedSerialExecutor() -> UnownedSerialExecutor {
-        if CFEqual(cfRef, CFRunLoopGetMain()) {
+        if queue.isMain {
             return MainActor.sharedUnownedExecutor
         } else if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
             return .init(complexEquality: self)
@@ -169,20 +267,27 @@ extension RunLoopPriorityExecutor: SerialExecutor {
     @inlinable
     nonisolated
     public func checkIsolated() {
-        precondition(CFEqual(cfRef, CFRunLoopGetCurrent()), "Unexpected isolation context, expected to be executing on \(cfRef)")
+        precondition(CFEqual(queue.runLoop, CFRunLoopGetCurrent()), "Unexpected isolation context, expected to be executing on \(runLoop)")
     }
     
     @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     @inlinable
     nonisolated
     public func enqueue(_ job: consuming ExecutorJob) {
-        schedule(.init(job))
+        queue.schedule(.init(job))
+        
+        if !inRunLoop {
+            CFRunLoopWakeUp(queue.runLoop)
+        }
     }
     
     @inlinable
     nonisolated
     public func enqueue(_ job: UnownedJob) {
-        schedule(job)
+        queue.schedule(job)
+        if !inRunLoop {
+            CFRunLoopWakeUp(queue.runLoop)
+        }
     }
     
 }
@@ -211,59 +316,9 @@ extension RunLoopPriorityExecutor {
     // since thread local keeps stored reference alive and
     // user can call this method from thread pool( Concurrency, libdispatch)
     @usableFromInline
-    static let cache: some UnfairStateLock<[ObjectIdentifier: Boxed]> = createUncheckedStateLock(uncheckedState: [:])
+    static let cache: some UnfairStateLock<[ObjectIdentifier: Unmanaged<RunLoopPriorityExecutor>]> = createUncheckedStateLock(uncheckedState: [:])
     
-    @usableFromInline
-    static var sharedSource:(ManagedBuffer<Boxed,Void>, CFRunLoopSource) {
-        let buffer = ManagedBuffer<Boxed, Void>.create(minimumCapacity: 0) { _ in
-            return .init(value: nil)
-        }
-        var context = CFRunLoopSourceContext()
-        context.version = 0
-        context.info = Unmanaged.passUnretained(buffer).toOpaque()
-        context.retain = {
-            let ptr = Unmanaged<AnyObject>.fromOpaque($0!).retain().toOpaque()
-            return .init(ptr)
-        }
-        context.release = {
-            Unmanaged<AnyObject>.fromOpaque($0!).release()
-        }
-        context.perform = {
-            var heap:Heap<JobBlock>
-            let execute:(@Sendable (consuming UnownedJob) ->Void)
-            do {
-                let boxed = Unmanaged<ManagedBuffer<Boxed,Void>>.fromOpaque($0!)
-                    .takeUnretainedValue()
-                guard let ref = boxed.header.value else { return }
-                heap = ref.heaps.withLock{
-                    
-                    var old = Heap<JobBlock>()
-                    swap(&$0, &old)
-                    return old
-                }
-                let serial = ref.asUnownedSerialExecutor()
-                if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
-                    let task = ref.asUnownedTaskExecutor()
-                    execute = { [serial, task] in
-                        $0.runSynchronously(isolatedTo: serial, taskExecutor: task)
-                    }
-                } else {
-                    execute = { [serial] in
-                        $0.runSynchronously(on: serial)
-                    }
-                }
-            }
-            while let block = heap.popMax() {
-                execute(block.jobImp)
-            }
-        }
-
-        context.copyDescription = { null in
-            let description = "RunLoopPExecutor"
-            return .passRetained(description as CFString)
-        }
-        return (buffer, CFRunLoopSourceCreate(nil, 0, &context))
-    }
+ 
 }
 
 extension RunLoopPriorityExecutor {
@@ -288,25 +343,25 @@ extension RunLoopPriorityExecutor {
     /// - Parameter setupHandle: called right before runLoop runs, runloop is active until executor is dead. this block is called exactly once.
     /// - Important: when using it with existing active runLoop, keep runloop alive until Executor is gracefully deinitialized
     @inlinable
-    public static func getOrCreate(_ block: (consuming Self) -> Void) {
+    public static func getOrCreate(_ block: (consuming RunLoopPriorityExecutor) -> Void) {
         if Thread.isMainThread {
             let executor = Self()
             (consume block)(executor)
             return
         }
-        let runLoop = RunLoop.current
+        let runLoop = RunLoop.current.getCFRunLoop()
         let key = ObjectIdentifier(runLoop)
-        if let existing = cache.withLockUnchecked({
-            $0[key]?.value
+        if let existing = cache.withLock({
+            $0[key]?.takeUnretainedValue()
         }) {
-            (consume block)(existing as! Self)
+            (consume block)(existing)
             return
         }
         let source:CFRunLoopSource
         do {
             let executor = Self()
-            Self.cache.withLockUnchecked{
-                $0[key] = .init(value: executor)
+            Self.cache.withLock{
+                $0[key] = .passUnretained(executor)
             }
             source = executor.source
             (consume block)(executor)
@@ -343,4 +398,5 @@ extension RunLoopPriorityExecutor {
  
  
  */
+
 

@@ -4,6 +4,7 @@
 //
 //  Created by 박병관 on 6/30/24.
 //
+import Darwin
 
 @usableFromInline
 struct JobBlock: Hashable, Comparable, Sendable {
@@ -12,6 +13,8 @@ struct JobBlock: Hashable, Comparable, Sendable {
     let id:Int
     @usableFromInline
     let jobImp:UnownedJob
+    nonisolated(unsafe)
+    var token:pthread_override_t?
     
     @usableFromInline
     var priority:UInt8 {
