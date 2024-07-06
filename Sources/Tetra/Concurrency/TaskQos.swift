@@ -6,98 +6,87 @@
 //
 import Dispatch
 
-@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
-extension JobPriority {
+extension TaskPriority {
     
     func evaluateQos() -> DispatchQoS {
-        if rawValue == DispatchQoS.unspecified.qosClass.rawValue.rawValue {
+        let userInteractive = TaskPriority.userInteractive
+        switch self {
+        case userInteractive:
+            return .userInteractive
+        case .high:
+            return .userInitiated
+        case .medium:
+            return .default
+        case .low:
+            return .utility
+        case .background:
+            return .background
+        case .unspecified:
             return .unspecified
+        default:
+            break
         }
-        var value = DispatchQoS.QoSClass.userInteractive
-        while true {
-            let diff = Int(rawValue) - Int(value.rawValue.rawValue)
-            // same
-            if diff == 0 {
-                return .init(qosClass: value, relativePriority: 0)
-            }
-            // current priority is higher than QOS
-            // check for upgrade
-            if diff > 0 {
-                if value == .userInteractive {
-                    return .userInteractive
-                }
-                // try to upgrade
-                if let upgrade = value.up {
-                    value = upgrade
-                    continue
-                } else {
-                    return .unspecified
-                }
-            }
-            // check for downgrade
-            // relativePriority can only have negative ~ 0 priority
-            // current priority is less or equal to next lower level
-            if value == .background {
-                // fallthrough
-            } else if let downgrade = value.down {
-                if rawValue <= downgrade.rawValue.rawValue {
-                    value = downgrade
-                    continue
-                }
-                // fallthrough
-            } else {
-                return .unspecified
-            }
-            // current priority is greater or equal to next lower level, but lower than current qos
-            // use relativePriority!
-            let relativePriority = max(Int(QOS_MIN_RELATIVE_PRIORITY), diff)
-            return .init(qosClass: value, relativePriority: relativePriority)
+        if self > userInteractive {
+            return .userInteractive
+        }
+        let calculate = { (basis: TaskPriority) in
+            let diff = basis.rawValue - self.rawValue
+            return max(-Int(diff), Int(QOS_MIN_RELATIVE_PRIORITY))
+        }
+        if self < .background {
+            return .init(qosClass: .background, relativePriority: calculate(.background))
+        }
+        if (TaskPriority.userInitiated..<userInteractive).contains(self) {
+            return .init(qosClass: .userInteractive, relativePriority: calculate(userInteractive))
+        }
+        if (TaskPriority.medium..<TaskPriority.userInitiated).contains(self) {
+            return .init(qosClass: .userInitiated, relativePriority: calculate(.userInitiated))
+        }
+        if (TaskPriority.low..<TaskPriority.medium).contains(self) {
+            return .init(qosClass: .default, relativePriority: calculate(.medium))
+        }
+        if (TaskPriority.background..<TaskPriority.low).contains(self) {
+            return .init(qosClass: .utility, relativePriority: calculate(.low))
         }
         return .unspecified
     }
     
-
 }
 
-extension DispatchQoS.QoSClass {
+extension DispatchQoS {
     
-    var down:Self? {
-        switch self {
-        case .background:
-            return nil
-        case .utility:
-            return .background
-        case .default:
-            return .utility
-        case .userInitiated:
-            return .default
+    func evaluateTaskPriority() -> TaskPriority? {
+        let evaluate = { (base:TaskPriority) in
+            let rawValue = Int8(bitPattern: base.rawValue) + Int8(relativePriority)
+            return TaskPriority(rawValue: UInt8(bitPattern: rawValue))
+        }
+        switch qosClass {
         case .userInteractive:
-            return .userInitiated
-        case .unspecified:
-            return nil
-        @unknown default:
+            return evaluate(.userInteractive)
+        case .userInitiated:
+            return evaluate(.high)
+        case .default:
+            return evaluate(.medium)
+        case .utility:
+            return evaluate(.low)
+        case .background:
+            return evaluate(.background)
+        default:
             return nil
         }
+        
     }
     
-    var up:Self? {
-        switch self {
-        case .background:
-            return .utility
-        case .utility:
-            return .default
-        case .default:
-            return .userInitiated
-        case .userInitiated:
-            return .userInteractive
-        case .userInteractive:
-            return nil
-        case .unspecified:
-            return nil
-        @unknown default:
-            return nil
-        }
-    }
 }
 
+
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+extension JobPriority {
+    
+    func evaluateQos() -> DispatchQoS {
+        return TaskPriority(rawValue: rawValue).evaluateQos()
+    }
+    
+
+}
 

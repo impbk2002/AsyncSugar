@@ -30,6 +30,7 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
     nonisolated(unsafe)
     internal let thread:pthread_t
     
+    
     @usableFromInline
     init(
         runLoop: RunLoop,
@@ -38,11 +39,12 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
     ) {
         self.runLoop = runLoop.getCFRunLoop()
         self.thread = threadId
-        self.isMain = CFEqual(runLoop, CFRunLoopGetMain())
+        self.isMain = CFEqual(runLoop.getCFRunLoop(), CFRunLoopGetMain())
         if isMain {
             self.source = CFRunLoopSourceCreate(nil, 0, nil)
             CFRunLoopSourceInvalidate(source)
         } else {
+ 
             self.source = RunLoopSourceCreateWithHandler { [heaps] in
                 
                 guard $0 == .perform else { return }
@@ -52,14 +54,38 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
                     swap(&next, &$0)
                     return next
                 }
-                while let block = queue.popMax() {
-                    defer {
-                        if let ref = block.token {
-                            pthread_override_qos_class_end_np(ref)
-                        }
+                let currentQos:DispatchQoS
+                do {
+                    let thread_qos = qos_class_self()
+                    var priority:Int32 = 0
+                    pthread_get_qos_class_np(pthread_self(), nil, &priority)
+                    currentQos = .init(qosClass: .init(rawValue: thread_qos)!, relativePriority: Int(priority))
+                }
+                var qos: DispatchQoS = currentQos
+
+                defer {
+                    if qos.qosClass != currentQos.qosClass {
+                        let result = pthread_set_qos_class_self_np(currentQos.qosClass.rawValue, Int32(currentQos.relativePriority))
+                        assert(result == 0, "\(result)")
                     }
+                }
+
+                var jobPriority = currentQos.evaluateTaskPriority()
+                while let block = queue.popMax() {
                     let job = block.jobImp
-                    execute(job)
+                    defer { execute(job) }
+                    if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *), let newTaskPriority = TaskPriority(job.priority), jobPriority != newTaskPriority {
+                        let newQos = newTaskPriority.evaluateQos()
+                        jobPriority = newTaskPriority
+                        let result = pthread_set_qos_class_self_np(newQos.qosClass.rawValue, Int32(newQos.relativePriority))
+                        qos = newQos
+                        assert(result == 0, "\(result)")
+                        
+                    }
+                    if let ref = block.token {
+                        let result = pthread_override_qos_class_end_np(ref)
+                        assert(result == 0, "\(result) pthread_override_qos_class_end_np failed")
+                    }
                 }
             }
             CFRunLoopAddSource(self.runLoop, source, .commonModes)
@@ -112,27 +138,33 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
             MainActor.shared.enqueue(job)
             return
         }
-
-        let override: pthread_override_t?
-        
+        let qos:DispatchQoS?
         if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *) {
-            let qos = job.priority.evaluateQos()
-            if qos.qosClass == .unspecified {
-                override = nil
+            let value = TaskPriority(job.priority)?.evaluateQos()
+            if value?.qosClass != .unspecified {
+                qos = value
             } else {
-                override = pthread_override_qos_class_start_np(thread, qos.qosClass.rawValue, Int32(qos.relativePriority))
+                qos = nil
             }
         } else {
-            override = nil
+            qos = nil
         }
-        
-        
+        let threadId = thread
+        var qos_class = QOS_CLASS_UNSPECIFIED
+        pthread_get_qos_class_np(threadId, &qos_class, nil)
+//        print(DispatchQoS.QoSClass(rawValue: qos_class)!)
         heaps.withLockUnchecked{ [job] in
             // lastest has the lower id which results lower priority
             let id = -$0.count
-            var item = JobBlock(id: id, jobRef: consume job)
-            item.token = override
+            let item = JobBlock(id: id, jobRef: consume job)
             $0.insert(item)
+            if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *), var max = $0.popMax() {
+                if max.token == nil, let qos, qos.qosClass.rawValue != qos_class, item.priority == max.priority {
+                    let override:pthread_override_t? = pthread_override_qos_class_start_np(threadId, qos.qosClass.rawValue, Int32(qos.relativePriority))
+                    max.token = override
+                }
+                $0.insert(max)
+            }
         }
         CFRunLoopSourceSignal(source)
     }

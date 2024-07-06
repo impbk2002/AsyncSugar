@@ -5,7 +5,9 @@
 //  Created by 박병관 on 6/30/24.
 //
 import Darwin
+import Dispatch
 
+// three word is max size to use stack allocation
 @usableFromInline
 struct JobBlock: Hashable, Comparable, Sendable {
     
