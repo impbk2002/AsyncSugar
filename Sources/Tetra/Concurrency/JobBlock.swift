@@ -28,7 +28,7 @@ struct JobBlock: Hashable, Comparable, Sendable {
     }
     
     @usableFromInline
-    @available(macOS 14.0, *)
+    @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
     init(id: Int, job: consuming ExecutorJob) {
         self.id = id
         self.jobImp = UnownedJob(job)
