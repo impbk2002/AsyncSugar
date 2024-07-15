@@ -5,11 +5,10 @@
 //  Created by 박병관 on 6/20/24.
 //
 @usableFromInline
-package protocol CompatDiscardingTaskGroup<Failure> {
+package protocol CompatDiscardingTaskGroup<Err> {
     
-    
-    associatedtype Failure:Error = any Error
-    typealias Block = @Sendable @isolated(any) () async throws(Failure) -> Void
+    associatedtype Err:Error = any Error
+    typealias Block = @isolated(any) @Sendable () async throws(Err) -> Void
     
     @inlinable
     var isCancelled:Bool { get }
@@ -23,13 +22,13 @@ package protocol CompatDiscardingTaskGroup<Failure> {
     @inlinable
     mutating func addTaskUnlessCancelled(
         priority: TaskPriority?,
-        operation: @escaping Block
+        operation: sending @escaping Block
     ) -> Bool
     
     @inlinable
     mutating func addTask(
         priority: TaskPriority?,
-        operation: @escaping Block
+        operation: sending @escaping Block
     )
     
     @inlinable
@@ -37,7 +36,7 @@ package protocol CompatDiscardingTaskGroup<Failure> {
     mutating func addTask(
         executorPreference taskExecutor: (any TaskExecutor)?,
         priority: TaskPriority?,
-        operation: @escaping Block
+        operation: sending @escaping Block
     )
     
     @inlinable
@@ -45,7 +44,7 @@ package protocol CompatDiscardingTaskGroup<Failure> {
     mutating func addTaskUnlessCancelled(
         executorPreference taskExecutor: (any TaskExecutor)?,
         priority: TaskPriority?,
-        operation: @escaping Block
+        operation: sending @escaping Block
     ) -> Bool
     
 }

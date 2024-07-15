@@ -154,3 +154,18 @@ public extension TetraExtension {
     
 }
 
+
+@preconcurrency
+@usableFromInline
+struct Suppress<Base>:@unchecked Sendable {
+    
+    @usableFromInline
+    nonisolated(unsafe)
+    var base:Base
+    
+    @usableFromInline
+    init(base: Base) {
+        self.base = base
+    }
+    
+}

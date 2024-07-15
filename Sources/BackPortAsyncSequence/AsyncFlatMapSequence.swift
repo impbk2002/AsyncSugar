@@ -98,7 +98,7 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
                 }
                 let segment: SegmentOfResult
                 do {
-                    segment = try await transform(item)
+                    segment = try await transform(Suppress(base: item).base)
                     var iterator = segment.makeAsyncIterator()
                     guard let element = try await iterator.next(isolation: actor) else {
                         currentIterator = nil

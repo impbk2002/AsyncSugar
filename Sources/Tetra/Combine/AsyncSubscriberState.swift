@@ -70,7 +70,7 @@ struct AsyncSubscriberState<Input, Failure:Error> {
             case .resumeValue(let continuation, let input):
                 nonisolated(unsafe)
                 let value = Result<Input,Failure>.success(consume input)
-                continuation.resume(returning: value)
+                continuation.resume(returning: Suppress(value: value).value)
             case .request(let subscription, let demand):
                 subscription.request(demand)
             case .cancelAndDiscard(let array, discard: _):

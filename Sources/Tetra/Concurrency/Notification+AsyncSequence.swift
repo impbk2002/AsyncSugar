@@ -82,19 +82,18 @@ public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequ
     ) {
         self.center = center
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
-            nonisolated(unsafe)
-            let noti2 = notification
+
             let continuation = lock.withLockUnchecked { state in
                 let captured = state.pending.first
 
                 if state.pending.isEmpty {
-                    state.buffer.append(noti2)
+                    state.buffer.append(notification)
                 } else {
                     state.pending.removeFirst()
                 }
                 return captured
             }
-            continuation?.resume(returning: noti2)
+            continuation?.resume(returning: Suppress(value: notification).value)
         }
         lock.withLockUnchecked{
             $0.observer = observer

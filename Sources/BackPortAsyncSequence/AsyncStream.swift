@@ -49,7 +49,11 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
         if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
             return await baseIterator.next(isolation: actor)
         } else {
-            return await advanceNext()
+            nonisolated(unsafe)
+            var iter = self
+            let value = await iter.advanceNext()
+            self = iter
+            return value
         }
     }
     

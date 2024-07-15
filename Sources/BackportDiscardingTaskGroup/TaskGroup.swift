@@ -26,29 +26,26 @@ extension TaskGroup where ChildTaskResult == Void {
             await holder.hold()
             
         }
+        let suppress = Suppress(base: self)
         /// drain all the finished or failed Task
         async let subTask:Void = {
-            while let _ =  await next(isolation: actor) {
+            var iter = suppress.base
+            while let _ =  await iter.next(isolation: actor) {
                 if await holder.isFinished {
                     break
                 }
             }
         }()
+        nonisolated(unsafe)
+        let block = body
         async let mainTask = {
-            let v = await runBlock(isolation: actor, body:body)
+            var iter = suppress.base
+            let v = await block(actor, &iter)
             await holder.markDone()
             return Suppress(base: v)
         }()
         await subTask
         return await mainTask.base
-    }
-    
-    @usableFromInline
-    internal mutating func runBlock<T:Actor,V:~Copyable, ErrorRef:Error>(
-        isolation actor: isolated T,
-        body: (isolated T, inout Self) async throws(ErrorRef) -> sending V
-    ) async throws(ErrorRef) -> sending V {
-        try await body(actor, &self)
     }
     
 }
@@ -84,7 +81,7 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
 /// - Returns: which is returned from body
 /// - SeeAlso: withDiscardingTaskGroup(returning:body:)
 @inlinable
-package func simuateDiscardingTaskGroup<TaskResult: Sendable>(
+package func simuateDiscardingTaskGroup<TaskResult>(
     body: @Sendable @isolated(any) (inout TaskGroup<Void>) async -> sending TaskResult
 ) async -> sending TaskResult {
     guard let actor = body.isolation else {
@@ -94,7 +91,8 @@ package func simuateDiscardingTaskGroup<TaskResult: Sendable>(
         precondition(actor === region, "must be isolated on the inferred actor")
         nonisolated(unsafe)
         var unsafe = Suppress(base: group)
-        defer { group = unsafe.base }
-        return await body(&unsafe.base)
+        let value =  await body(&unsafe.base)
+        group = unsafe.base
+        return value
     }
 }

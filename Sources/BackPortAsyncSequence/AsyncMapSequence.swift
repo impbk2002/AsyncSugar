@@ -96,7 +96,7 @@ extension BackPort.AsyncMapSequence.Iterator: AsyncIteratorProtocol, TypedAsyncI
             return nil
         }
         do {
-            return try await transform(element)
+            return try await transform(Suppress(base: element).base)
         } catch {
             finished = true
             throw error
@@ -140,4 +140,88 @@ extension BackPort.AsyncMapSequence {
     
 }
 
+//
+//protocol AsyncProducer<Element,Failure>:~Copyable {
+//    
+//    associatedtype Failure:Error
+//    // this is not sendable
+//    associatedtype Element
+//    
+//    // since Element is not sendable we needs `sending`
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Failure) -> sending Element?
+//    
+//}
+//
+//struct MappingProducer<Element,Base:AsyncProducer>: AsyncProducer {
+//    
+//    var base:Base
+//    // can not omit isolation parameter, can not use isolated(any) either
+//    let compute:(isolated (any Actor), consuming Base.Element) async throws(Base.Failure) -> sending Element
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Base.Failure) -> sending Element? {
+//        if let value = try await base.produce(isolation: actor) {
+//            let newValue = try await compute(actor, value)
+//            return newValue
+//        }
+//        
+//        return nil
+//    }
+//    
+//}
+//
+//struct MutatingProducer<State:~Copyable,Effect,EventSource:AsyncProducer>:AsyncProducer,~Copyable {
+//    
+//    var failed = false
+//    var state:State
+//    var source:EventSource
+//    let mutation:(isolated (any Actor), inout State ,sending EventSource.Element) async throws(EventSource.Failure) -> sending Effect
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(EventSource.Failure) -> sending Effect? {
+//        if failed {
+//            return nil
+//        }
+//        if let event = try await source.produce(isolation: actor) {
+//            do {
+//                let effect = try await mutation(actor, &state, event)
+//                
+//                return effect
+//            } catch {
+//                failed = true
+//                throw error
+//            }
+//        }
+//        
+//        return nil
+//    }
+//    
+//    
+//}
 
+//struct FilteringProducer<Element,Base:AsyncProducer>: AsyncProducer {
+//    
+//    var failed = false
+//    var base:Base
+//    // can not omit isolation parameter, can not use isolated(any) either
+//    let predicate:(isolated (any Actor), borrowing Base.Element) async throws(Base.Failure) -> Bool
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Base.Failure) -> sending Base.Element? {
+//        if failed {
+//            return nil
+//        }
+//        if let value = try await base.produce(isolation: actor) {
+//            do {
+//                // Sending 'value' risks causing data races
+//                // may be marking parameter as ~Escape would help?
+//                if try await predicate(actor, value) {
+//                    return value
+//                }
+//            } catch {
+//                failed = true
+//                throw error
+//            }
+//        }
+//        
+//        return nil
+//    }
+//    
+//}

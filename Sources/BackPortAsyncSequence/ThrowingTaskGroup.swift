@@ -50,7 +50,7 @@ extension TypedThrowingTaskGroup.Iterator: AsyncIteratorProtocol, TypedAsyncIter
     
     @inlinable
     public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Element? {
-        return try await parent.nextResult()?.get()
+        return try await parent.nextResult(isolation: actor)?.get()
     }
     
     @_disfavoredOverload

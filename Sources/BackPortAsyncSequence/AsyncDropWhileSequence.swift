@@ -45,7 +45,7 @@ extension BackPort.AsyncDropWhileSequence: AsyncSequence, TypedAsyncSequence {
         var baseIterator: Base.AsyncIterator
         
         @usableFromInline
-        let predicate: ((Base.Element) async throws(Failure) -> Bool)
+        let predicate: (( Base.Element) async throws(Failure) -> Bool)
         
         @usableFromInline
         var finished = false
@@ -94,7 +94,8 @@ extension BackPort.AsyncDropWhileSequence.Iterator: AsyncIteratorProtocol, Typed
                 return nil
             }
             do {
-                if try await predicate(element) == false {
+            
+                if try await predicate(Suppress(base: element).base) == false {
                     doneDropping = true
                     return element
                 }

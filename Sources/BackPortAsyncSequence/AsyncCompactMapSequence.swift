@@ -94,7 +94,7 @@ extension BackPort.AsyncCompactMapSequence.Iterator: AsyncIteratorProtocol, Type
                 return nil
             }
             do {
-                if let transformed = try await transform(element) {
+                if let transformed = try await transform(Suppress(base: element).base) {
                     return transformed
                 }
             } catch {

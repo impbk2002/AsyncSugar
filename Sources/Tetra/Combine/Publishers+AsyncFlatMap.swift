@@ -145,7 +145,10 @@ extension AsyncFlatMap {
             } else {
                 try? await simuateThrowingDiscardingTaskGroup(isolation: SafetyRegion()) { barrier, group in
                     defer { terminateStream() }
-                    await localTask(isolation: barrier, group: &group)
+                    nonisolated(unsafe)
+                    var unsafe = Suppress(value: group)
+                    await localTask(isolation: barrier, group: &unsafe.value)
+                    group = unsafe.value
                 }
             }
             send(completion: .finished, shouldCancel: false)

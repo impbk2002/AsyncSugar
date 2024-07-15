@@ -275,7 +275,10 @@ extension MultiMapTask {
                 }
             } else {
                 await simuateDiscardingTaskGroup(isolation: SafetyRegion()) { actor, group in
-                    await localTask(isolation: actor, group: &group)
+                    nonisolated(unsafe)
+                    var unsafe = Suppress(value: group)
+                    await localTask(isolation: actor, group: &unsafe.value)
+                    group = unsafe.value
                 }
             }
             // we assume no one is accessing other state

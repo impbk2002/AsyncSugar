@@ -79,7 +79,7 @@ extension BackPort.AsyncFilterSequence.Iterator: AsyncIteratorProtocol, TypedAsy
                 return nil
             }
             do {
-                if try await isIncluded(element) {
+                if try await isIncluded(Suppress(base: element).base) {
                     return element
                 }
             } catch {

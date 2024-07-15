@@ -7,9 +7,12 @@
 
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
 extension DiscardingTaskGroup: CompatDiscardingTaskGroup {
-    @usableFromInline
-    package typealias Failure = NoThrow
     
+    @usableFromInline
+    package typealias Err = NoThrow
+//    @usableFromInline
+//    package typealias Failure = NoThrow
+//    
     @_disfavoredOverload
     @inlinable
     package mutating func addTaskUnlessCancelled(priority: TaskPriority?, operation: @escaping Block) -> Bool {
@@ -97,7 +100,7 @@ extension TaskGroup: CompatDiscardingTaskGroup where ChildTaskResult == Void {
     }
     
     @usableFromInline
-    package typealias Failure = NoThrow
+    package typealias Err = NoThrow
 
     
 }
@@ -105,11 +108,14 @@ extension TaskGroup: CompatDiscardingTaskGroup where ChildTaskResult == Void {
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
 extension ThrowingDiscardingTaskGroup: CompatDiscardingTaskGroup {
 
+    @usableFromInline
+    package typealias Err = any Error
 }
 
 
 extension ThrowingTaskGroup: CompatDiscardingTaskGroup where ChildTaskResult == Void {
-
+    @usableFromInline
+    package typealias Err = any Error
 }
 
 

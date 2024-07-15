@@ -34,7 +34,7 @@ extension LegacyTypedAsyncSequence: AsyncSequence, TypedAsyncSequence {
     public struct Iterator {
         
         @usableFromInline
-        var baseIterator:Base.AsyncIterator
+        package var baseIterator:Base.AsyncIterator
         
 
         @inlinable
@@ -57,7 +57,16 @@ extension LegacyTypedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIt
         if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *) {
             return try await baseIterator.next(isolation: actor)
         } else {
-            return try await advance()
+            nonisolated(unsafe)
+            var iter = self
+            do {
+                let value = try await iter.advance()
+                self = iter
+                return value
+            } catch {
+                self = iter
+                throw error
+            }
         }
     }
     
