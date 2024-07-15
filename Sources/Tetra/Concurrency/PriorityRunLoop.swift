@@ -70,6 +70,10 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
                     }
                 }
 
+                /*
+                 Managing QoS, boost CPU instructions about 5% and decrease CPU cycles by 5% when root task is about `low` priority. and enqueing about 500 random priority tasks at the same time.
+                 
+                 */
                 var jobPriority = currentQos.evaluateTaskPriority()
                 while let block = queue.popMax() {
                     let job = block.jobImp
