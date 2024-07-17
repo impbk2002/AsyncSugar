@@ -53,7 +53,11 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     internal func _performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
         var result:Result<T,Failure>? = nil
         base.performAndWait {
-            result = wrapToResult(body)
+            do throws(Failure) {
+                result = .success(try body())
+            } catch {
+                result = .failure(error)
+            }
         }
         guard let result else {
             preconditionFailure("performAndWait didn't run")
@@ -106,6 +110,7 @@ extension TetraExtension where Base: NSManagedObjectContext {
         _ body: () throws(Failure) -> T
     ) async throws(Failure) -> T {
         let result: Result<T,Failure> = await withoutActuallyEscaping(body) { escapingClosure in
+
             let holder = ClosureHolder(closure: escapingClosure)
             defer {
                 withExtendedLifetime(holder, {})
@@ -113,8 +118,7 @@ extension TetraExtension where Base: NSManagedObjectContext {
 
             return await withUnsafeContinuation { continuation in
                 base.perform{ [unowned holder, continuation] in
-                    nonisolated(unsafe)
-                    let result = wrapToResult(holder.closure)
+                    let result = holder()
                     continuation.resume(returning: result)
                 }
             }
@@ -164,7 +168,11 @@ extension TetraExtension where Base: NSManagedObjectContext {
     internal func _performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
         var result:Result<T,Failure>? = nil
         base.performAndWait {
-            result = wrapToResult(body)
+            do throws(Failure) {
+                result = .success(try body())
+            } catch {
+                result = .failure(error)
+            }
         }
         guard let result else {
             preconditionFailure("performAndWait didn't run")
@@ -200,16 +208,6 @@ extension TetraExtension where Base: NSPersistentContainer {
         }
     }
     
-    @inline(__always)
-    @usableFromInline
-    internal func _convertToResult<T,Failure:Error>(_ context:NSManagedObjectContext, _ body: (NSManagedObjectContext) throws(Failure) -> T) -> Result<T,Failure> {
-        do {
-            let value = try body(context)
-            return .success(value)
-        } catch {
-            return .failure(error)
-        }
-    }
 
     
     @usableFromInline
@@ -222,7 +220,7 @@ extension TetraExtension where Base: NSPersistentContainer {
             return await withUnsafeContinuation { continuation in
                 base.performBackgroundTask { [unowned holder, continuation] newContext in
                     nonisolated(unsafe)
-                    let result = _convertToResult(newContext, holder.closure)
+                    let result = holder(newContext)
                     continuation.resume(returning: result)
                 }
             }
@@ -252,4 +250,3 @@ public enum CoreDataScheduledTaskType: Sendable, Hashable {
 }
 
 #endif
-

@@ -132,20 +132,18 @@ extension MultiMapTask {
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
-                        let result = await wrapToResult(consume success, transform)
-                        switch result {
-                        case .failure(let error):
+                        do throws(Failure) {
+                            let value = try await transform(success)
+                            do {
+                                // no contention except `request` and `cancel`
+                                try await send(isolation: barrier, value)
+                            } catch {
+                                await barrier.markDone()
+                            }
+                        } catch {
                             await barrier.markDone()
                             // no contention except `request` and `cancel`
                             await send(barrier: barrier, completion: .failure(error), cancel: true)
-                        case .success(let success):
-                            do {
-                                // no contention except `request` and `cancel`
-                                try await send(isolation: barrier, success)
-                            } catch {
-                                await barrier.markDone()
-//                                token.store(true, ordering: .releasing)
-                            }
                         }
                     }
                     if !flag {
@@ -274,7 +272,7 @@ extension MultiMapTask {
                     )
                 }
             } else {
-                await simuateDiscardingTaskGroup(isolation: SafetyRegion()) { actor, group in
+                await simuateDiscardingTaskGroup(isolation: SafetyRegion()) { @Sendable actor, group in
                     nonisolated(unsafe)
                     var unsafe = Suppress(value: group)
                     await localTask(isolation: actor, group: &unsafe.value)

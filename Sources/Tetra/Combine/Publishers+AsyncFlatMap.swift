@@ -367,25 +367,19 @@ extension AsyncFlatMap {
             barrier: some Actor
         ) async -> Bool {
             let result:Result<Output, Failure>?
-            do {
+            do throws(Failure) {
+                let value = try await iterator.next(isolation: nil)
+                
                 if let value = try await iterator.next(isolation: nil) {
-                    result = .success(value)
+                    await handleDownStream(isolation: barrier, event: .success(.init(value: value)))
+                    return true
                 } else {
-                    result = nil
+                    await handleDownStream(isolation: barrier, event: .success(.none))
+                    return false
                 }
             } catch {
-                result = .failure(error)
-            }
-            switch result {
-            case .none:
-                await handleDownStream(isolation: barrier, event: .success(.none))
-                return false
-            case .failure(let error):
                 await handleDownStream(isolation: barrier, event: .failure(error))
                 return false
-            case .success(let value):
-                await handleDownStream(isolation: barrier, event: .success(.init(value: value)))
-                return true
             }
         }
         
@@ -407,19 +401,18 @@ extension AsyncFlatMap {
                     return
                 case .success(let value):
                     let isSuccess = group.addTaskUnlessCancelled(priority: nil) {
-                        let segmentResult = await makeSegment(value)
-                        var iterator:Segment.AsyncIterator
-                        switch segmentResult {
-                        case .failure(let failure):
+                        let segment:Segment
+                        do throws(Failure) {
+                            segment = try await transform(value)
+                        } catch {
                             await barrier.markDone()
                             await handleDownStream(
                                 isolation: barrier,
-                                event: .failure(failure)
+                                event: .failure(error)
                             )
                             return
-                        case .success(let source):
-                            iterator = source.makeAsyncIterator()
                         }
+                        var iterator = segment.makeAsyncIterator()
                         while true {
                             let isUnlimited = try await nextDemand(barrier: barrier)
                             if isUnlimited {

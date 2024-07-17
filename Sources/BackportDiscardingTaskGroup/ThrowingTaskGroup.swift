@@ -1,32 +1,26 @@
 //
 //  ThrowingTaskGroup.swift
-//  
+//
 //
 //  Created by 박병관 on 6/20/24.
 //
 
-
-extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error {
-    
-    /// work around for simulating Discarding TaskGroup
-    ///
-    ///  TaskGroup is protected by the actor isolation
-    ///  - important: always call TaskGroup api while holding isolation
-    @usableFromInline
-    internal mutating func simulateDiscarding<T:Actor, V>(
-        isolation actor: isolated T,
-        body: (isolated T, inout Self) async throws -> sending V
-    ) async throws -> V {
+@inlinable
+package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
+    isolation actor: isolated T,
+    body: @Sendable (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
+) async throws -> sending TaskResult {
+    return try await withThrowingTaskGroup(of: Void.self, returning: TaskResult.self) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
         if await holder.isFinished {
             preconditionFailure("SafetyRegion is already used!")
         }
-        addTask(priority: .background) {
+        group.addTask(priority: .background) {
             /// keep at least one child task alive
             /// so that subTask won't return
             await holder.hold()
         }
-        let suppress = Suppress(base: self)
+        let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
         async let subTask:Void = {
             var iter = suppress.base
@@ -36,12 +30,10 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
                 }
             }
         }()
-        nonisolated(unsafe)
-        let block = body
         async let mainTask = {
+            var iter = suppress.base
             do {
-                var iter = suppress.base
-                let v = try await block(actor, &iter)
+                let v = try await body(actor, &iter)
                 await holder.markDone()
                 return Suppress(base: v)
             } catch {
@@ -56,6 +48,7 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
             try await subTask
             errorRef = nil
         } catch {
+            group.cancelAll()
             errorRef = error
         }
         let value = try await mainTask.base
@@ -67,19 +60,8 @@ extension ThrowingTaskGroup where ChildTaskResult == Void, Failure == any Error 
 }
 
 @inlinable
-package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
-    isolation actor: isolated T,
-    body: @Sendable (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
-) async throws -> sending TaskResult {
-    try await withThrowingTaskGroup(of: Void.self, returning: TaskResult.self) {
-        try await $0.simulateDiscarding(isolation: actor, body: body)
-    }
-}
-
-
-@inlinable
 package func simuateThrowingDiscardingTaskGroup<TaskResult>(
-    body: @Sendable @isolated(any) (inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
+    body: @isolated(any) (inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
 ) async throws -> sending TaskResult {
     guard let actor = body.isolation else {
         preconditionFailure("body must be isolated")
@@ -98,5 +80,3 @@ package func simuateThrowingDiscardingTaskGroup<TaskResult>(
         }
     }
 }
-
-
