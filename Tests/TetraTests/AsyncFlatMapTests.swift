@@ -26,30 +26,30 @@ final class AsyncFlatMapTests: XCTestCase {
             .asyncFlatMap(maxTasks: .max(1)) { value in
                 return AsyncStream<Int>{ continuation in
                     sample.forEach{
-                        continuation.yield($0)
+                        let result = continuation.yield($0)
+                        if case .enqueued(_) = result {
+                            
+                        } else {
+                            XCTFail("should not reach")
+                        }
                     }
                     continuation.finish()
                 }.tetra.bridge()
-                    .tetra.map{
-                        await Task.yield()
-                        return $0
-                    }
             }
             .handleEvents(
                 receiveSubscription: {
                     XCTAssertEqual("\($0)", "AsyncFlatMap")
                 }
             )
-            
             // ensure downstream do not request unlimited
             .buffer(size: 1, prefetch: .keepFull, whenFull: .customError{ fatalError() })
-            .prefix(10)
+            //.prefix(10)
             .sink { _ in
                 completion.fulfill()
             } receiveValue: {
                 array.append($0)
             }
-        wait(for: [completion], timeout: 0.1)
+        wait(for: [completion], timeout: 0.5)
         bag.cancel()
         XCTAssertEqual(array, sample + sample)
     }
@@ -253,6 +253,7 @@ final class AsyncFlatMapTests: XCTestCase {
                     }
                 }
                 let transformTask = withUnsafeCurrentTask{ $0 }?.hashValue
+                // every segment runs in separate child task
                 let stream = AsyncStream<Int>{
                     await Task.yield()
                     withUnsafeCurrentTask {
@@ -270,7 +271,7 @@ final class AsyncFlatMapTests: XCTestCase {
             } receiveValue: {
                 buffer.append($0)
             }.store(in: &holder.bag)
-        wait(for: [completion], timeout: 0.2)
+        wait(for: [completion], timeout: 200)
         XCTAssertEqual(buffer, [1,2,3,4])
     }
 

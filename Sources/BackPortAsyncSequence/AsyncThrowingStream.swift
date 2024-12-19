@@ -51,12 +51,13 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
         } else {
             nonisolated(unsafe)
             var iter = self
+            defer {
+                self = iter
+            }
             do {
                 let value = try await iter.nextValue()?.base
-                self = iter
                 return value
             } catch {
-                self = iter
                 throw (error as! Failure)
             }
         }

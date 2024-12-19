@@ -51,8 +51,10 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
         } else {
             nonisolated(unsafe)
             var iter = self
+            defer {
+                self = iter
+            }
             let value = await iter.advanceNext()?.base
-            self = iter
             return value
         }
     }
@@ -65,8 +67,8 @@ extension AsyncTypedStream.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorPr
     
     @inline(__always)
     @usableFromInline
-    @preconcurrency
-    internal mutating func advanceNext() async -> Suppress<Element>? {
+//    @preconcurrency
+    internal mutating func advanceNext() async -> sending Suppress<Element>? {
         guard let value = await baseIterator.next() else { return nil }
         return .init(base: value)
     }

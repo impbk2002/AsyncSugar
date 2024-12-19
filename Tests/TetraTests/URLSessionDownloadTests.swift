@@ -9,11 +9,12 @@ import XCTest
 @testable import Tetra
 import Namespace
 
+@preconcurrency
 final class URLSessionDownloadTests: XCTestCase {
     
     
     private static let text = UUID().uuidString
-    private static var webserver:Result<SimpleHTTPServer,Error>? = nil
+    nonisolated(unsafe) private static var webserver:Result<SimpleHTTPServer,Error>? = nil
     
     private var url: URL {
         get throws {

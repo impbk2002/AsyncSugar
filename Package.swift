@@ -102,7 +102,10 @@ let package = Package(
             dependencies: [
                 "Tetra"
             ],
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )

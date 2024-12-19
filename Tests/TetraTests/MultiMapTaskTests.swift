@@ -74,7 +74,7 @@ final class MultiMapTaskTests: XCTestCase {
         let target = try XCTUnwrap(sequence.randomElement())
         let upstream = sequence.publisher.setFailureType(to: CancellationError.self)
         let expect = expectation(description: "task failure")
-        let block:@Sendable (Int) async throws(CancellationError) -> Int = {
+        let block:@Sendable (Int) async throws(CancellationError) -> sending Int = {
             if $0 == target {
                 try Result<Void,CancellationError>.failure(CancellationError()).get()
             }

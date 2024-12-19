@@ -6,7 +6,7 @@
 //
 import Combine
 import Foundation
-
+@preconcurrency
 class UnsafeCancellableHolder {
     
     var bag = Set<AnyCancellable>()

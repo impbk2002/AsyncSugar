@@ -366,9 +366,9 @@ extension AsyncFlatMap {
             iterator: inout Segment.AsyncIterator,
             barrier: some Actor
         ) async -> Bool {
-            let result:Result<Output, Failure>?
+//            let result:Result<Output, Failure>?
             do throws(Failure) {
-                let value = try await iterator.next(isolation: nil)
+//                let value = try await iterator.next(isolation: nil)
                 
                 if let value = try await iterator.next(isolation: nil) {
                     await handleDownStream(isolation: barrier, event: .success(.init(value: value)))
