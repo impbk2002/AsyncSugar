@@ -73,10 +73,6 @@ public struct AsyncSequencePublisher<Base: AsyncSequence>: Publisher where Base.
     
     public func receive<S>(subscriber: S) where S : Subscriber, Failure == S.Failure, Base.AsyncIterator.Element == S.Input {
         let processor = Inner(subscriber: subscriber)
-        // transfer the AsyncIterator to the Task
-        // can not tell the compiler that this is safe,
-        // but this transfer is safe from data race
-        nonisolated(unsafe)
         let unsafe = Suppress(value: base.makeAsyncIterator())
         let task = Task(priority: priority) { [capture = consume unsafe, barrier] in
             var iter = capture.value
@@ -202,7 +198,7 @@ extension AsyncSequencePublisher {
         
         func run(
             _ actor: isolated (any Actor)? = #isolation,
-            _ iterator: inout sending Base.AsyncIterator
+            _ iterator: inout Base.AsyncIterator
         ) async {
             let token:Void? = try? await waitForCondition()
             if token == nil {

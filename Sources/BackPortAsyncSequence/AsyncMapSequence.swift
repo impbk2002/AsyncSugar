@@ -49,7 +49,7 @@ extension BackPort.AsyncMapSequence: AsyncSequence, TypedAsyncSequence {
         var finished = false
         
         @usableFromInline
-        let transform: (Base.Element) async throws(Failure) -> sending Transformed
+        let transform: (Base.Element) async throws(Failure) -> Transformed
         
         @usableFromInline
         init(
@@ -95,8 +95,18 @@ extension BackPort.AsyncMapSequence.Iterator: AsyncIteratorProtocol, TypedAsyncI
         guard !finished, let element = try await baseIterator.next(isolation: actor) else {
             return nil
         }
-        do {
-            return try await transform(Suppress(base: element).base)
+//        let block = transform
+        let wrapper: (Base.Element) async -> Result<Suppress<Element>, Failure> = { [transform] in
+            do throws(Base.AsyncIterator.Err) {
+                let value = try await Suppress(base: transform($0))
+                return .success(value)
+            } catch {
+                return .failure(error)
+            }
+        }
+        do throws(Failure) {
+            
+            return try await wrapper(Suppress(base: element).base).get().base
         } catch {
             finished = true
             throw error

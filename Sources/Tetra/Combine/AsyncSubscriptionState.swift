@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
 
 enum AsyncSubscriptionState {
     
@@ -147,6 +147,7 @@ enum AsyncSubscriptionState {
         }
     }
     
+    @preconcurrency
     private mutating func finish() -> sending Effect? {
         switch self {
         case .suspending(let unsafeContinuation):
@@ -154,7 +155,8 @@ enum AsyncSubscriptionState {
             return .resume(unsafeContinuation)
         case .cached(let subscription):
             self = .finished
-            return .discard(subscription)
+            let what = consume subscription
+            return .discard(what)
         case .waiting:
             self = .finished
             fallthrough

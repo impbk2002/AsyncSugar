@@ -52,7 +52,7 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
             nonisolated(unsafe)
             var iter = self
             do {
-                let value = try await iter.nextValue()
+                let value = try await iter.nextValue()?.base
                 self = iter
                 return value
             } catch {
@@ -70,8 +70,9 @@ extension AsyncTypedThrowingStream.Iterator: AsyncIteratorProtocol, TypedAsyncIt
     
     @inline(__always)
     @usableFromInline
-    internal mutating func nextValue() async throws -> sending Element? {
-        try await baseIterator.next()
+    internal mutating func nextValue() async throws -> Suppress<Element>? {
+        guard let value = try await baseIterator.next() else { return nil }
+        return .init(base: value)
     }
     
 }

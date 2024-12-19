@@ -103,7 +103,7 @@ extension BackPort.AsyncPrefixWhileSequence.Iterator: AsyncIteratorProtocol, Typ
     @inlinable
     public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) -> Base.Element? {
         if !predicateHasFailed, let nextElement = try await baseIterator.next(isolation: actor) {
-            do {
+            do throws(Failure) {
                 if try await predicate(Suppress(base: nextElement).base) {
                     return nextElement
                 } else {

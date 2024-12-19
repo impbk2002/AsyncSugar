@@ -93,7 +93,7 @@ extension BackPort.AsyncDropWhileSequence.Iterator: AsyncIteratorProtocol, Typed
             guard let element = try await baseIterator.next(isolation: actor) else {
                 return nil
             }
-            do {
+            do throws(Failure) {
             
                 if try await predicate(Suppress(base: element).base) == false {
                     doneDropping = true

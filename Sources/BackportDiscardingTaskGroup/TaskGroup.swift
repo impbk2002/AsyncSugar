@@ -10,7 +10,7 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T = #isolation,
     body: @Sendable (isolated T, inout TaskGroup<Void>) async -> sending TaskResult
 ) async -> sending TaskResult {
-    return await withTaskGroup(of: Void.self, returning: TaskResult.self) { group in
+    let wrapped = await withTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
         if await holder.isFinished {
             preconditionFailure("SafetyRegion is already used!")
@@ -24,6 +24,7 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
         let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
         async let subTask:Void = {
+            nonisolated(unsafe)
             var iter = suppress.base
             while let _ =  await iter.next(isolation: actor) {
                 if await holder.isFinished {
@@ -39,8 +40,10 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
             return Suppress(base: v)
         }()
         await subTask
-        return await mainTask.base
+        let value = await mainTask.base
+        return Suppress(base: value)
     }
+    return wrapped.base
 }
 
 
@@ -70,11 +73,13 @@ package func simuateDiscardingTaskGroup<TaskResult>(
     guard let actor = body.isolation else {
         preconditionFailure("body must be isolated")
     }
+    nonisolated(unsafe)
+    let block = body
     return await simuateDiscardingTaskGroup(isolation: actor) { region, group in
         precondition(actor === region, "must be isolated on the inferred actor")
         nonisolated(unsafe)
         var unsafe = Suppress(base: group)
-        let value = await body(&unsafe.base)
+        let value = await block(&unsafe.base)
         group = unsafe.base
         return value
     }

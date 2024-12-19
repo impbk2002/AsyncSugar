@@ -48,7 +48,7 @@ extension BackPort.AsyncCompactMapSequence: AsyncSequence, TypedAsyncSequence {
         var baseIterator: Base.AsyncIterator
         
         @usableFromInline
-        let transform: (Base.Element) async throws(Failure) -> sending ElementOfResult?
+        let transform: (Base.Element) async throws(Failure) -> ElementOfResult?
         
         @usableFromInline
         var finished = false
@@ -93,8 +93,16 @@ extension BackPort.AsyncCompactMapSequence.Iterator: AsyncIteratorProtocol, Type
                 finished = true
                 return nil
             }
-            do {
-                if let transformed = try await transform(Suppress(base: element).base) {
+            let wrapper: (Base.Element) async -> Result<Suppress<Element?>, Failure> = { [transform] in
+                do throws(Base.AsyncIterator.Err) {
+                    let value = try await Suppress(base: transform($0))
+                    return .success(value)
+                } catch {
+                    return .failure(error)
+                }
+            }
+            do throws(Failure) {
+                if let transformed = try await wrapper(Suppress(base: element).base).get().base {
                     return transformed
                 }
             } catch {

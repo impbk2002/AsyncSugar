@@ -26,8 +26,9 @@ extension TetraExtension where Base: _CombineFuterProtocol {
                         $0.request(.max(1))
                         subscription = $0
                     },
-                    receiveValue: { (value: sending Base.Output) in
-                        continuation.resume(returning: .success(value))
+                    receiveValue: { (value: Base.Output) in
+                        let variable = Suppress(value: value)
+                        continuation.resume(returning: .success(variable.value))
                         return .none
                     },
                     receiveCompletion: {

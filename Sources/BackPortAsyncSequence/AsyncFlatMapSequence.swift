@@ -47,7 +47,7 @@ extension BackPort.AsyncFlatMapSequence: AsyncSequence, TypedAsyncSequence {
         var baseIterator: Base.AsyncIterator
         
         @usableFromInline
-        let transform: (Base.Element) async throws(Failure) -> sending SegmentOfResult
+        let transform: (Base.Element) async throws(Failure) -> SegmentOfResult
         
         @usableFromInline
         var currentIterator: SegmentOfResult.AsyncIterator?
@@ -58,7 +58,7 @@ extension BackPort.AsyncFlatMapSequence: AsyncSequence, TypedAsyncSequence {
         @usableFromInline
         init(
             baseIterator: Base.AsyncIterator,
-            transform: @escaping (Base.Element) async throws(Failure) -> sending SegmentOfResult
+            transform: @escaping (Base.Element) async throws(Failure) -> SegmentOfResult
         ) {
             self.baseIterator = baseIterator
             self.transform = transform
@@ -96,9 +96,13 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
                 guard let item = try await baseIterator.next(isolation: actor) else {
                     return nil
                 }
-                let segment: SegmentOfResult
+                let block = transform
+                let wrapper = {
+                    let a = try await block($0)
+                    return Suppress(base: a)
+                }
                 do {
-                    segment = try await transform(Suppress(base: item).base)
+                    let segment: SegmentOfResult = try await wrapper(Suppress(base: item).base).base
                     var iterator = segment.makeAsyncIterator()
                     guard let element = try await iterator.next(isolation: actor) else {
                         currentIterator = nil
@@ -109,7 +113,7 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
                 } catch {
                     finished = true
                     currentIterator = nil
-                    throw error
+                    throw error as! Failure
                 }
             }
         }

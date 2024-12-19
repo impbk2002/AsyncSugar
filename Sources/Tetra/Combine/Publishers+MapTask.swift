@@ -76,7 +76,7 @@ public struct MapTask<Upstream:Publisher, Output>: Publisher where Upstream.Outp
             maxTasks: .max(1),
             upstream: upstream,
             transform: { [transform] value throws(Failure) in
-                try await transform(consume value).get()
+                Suppress(value: try await transform(value).get()).value
             })
         .subscribe(MapTaskInner(description: "MapTask", downstream: subscriber))
     }

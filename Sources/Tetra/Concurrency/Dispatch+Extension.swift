@@ -6,7 +6,7 @@
 //
 
 @preconcurrency import Foundation
-import Dispatch
+@preconcurrency import Dispatch
 internal import CriticalSection
 import Namespace
 

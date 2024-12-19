@@ -60,7 +60,7 @@ extension LegacyTypedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIt
             nonisolated(unsafe)
             var iter = self
             do {
-                let value = try await iter.advance()
+                let value = try await iter.advance()?.base
                 self = iter
                 return value
             } catch {
@@ -78,8 +78,9 @@ extension LegacyTypedAsyncSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIt
     
     @inline(__always)
     @usableFromInline
-    internal mutating func advance() async throws(Failure) -> sending Element? {
-        try await baseIterator.next()
+    internal mutating func advance() async throws(Failure) -> Suppress<Element>? {
+        guard let value = try await baseIterator.next() else { return nil }
+        return .init(base: value)
     }
     
     

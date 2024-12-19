@@ -36,7 +36,7 @@ let package = Package(
         .target(
             name: "Namespace",
             swiftSettings: [
-                .swiftLanguageVersion(.v6)
+                .swiftLanguageMode(.v6)
             ]
         ),
         .target(
@@ -45,7 +45,7 @@ let package = Package(
                 "Namespace",
             ],
             swiftSettings: [
-                .swiftLanguageVersion(.v6)
+                .swiftLanguageMode(.v6)
             ]
         ),
         .target(
@@ -55,7 +55,7 @@ let package = Package(
                 
             ],
             swiftSettings: [
-                .swiftLanguageVersion(.v6),
+                .swiftLanguageMode(.v6),
                 .enableExperimentalFeature("StaticExclusiveOnly"),
                 .enableExperimentalFeature("RawLayout"),
                 .enableExperimentalFeature("BuiltinModule"),
@@ -69,7 +69,7 @@ let package = Package(
             swiftSettings: [
                 .enableUpcomingFeature("FullTypedThrows"),
                 .enableExperimentalFeature("IsolatedAny"),
-                .swiftLanguageVersion(.v6)
+                .swiftLanguageMode(.v6)
             ]
         ),
         .target(
@@ -87,14 +87,14 @@ let package = Package(
             swiftSettings: [
                 .enableUpcomingFeature("FullTypedThrows"),
                 .enableExperimentalFeature("IsolatedAny"),
-                .swiftLanguageVersion(.v6)
+                .swiftLanguageMode(.v6)
             ]
         ),
         .target(
             name: "BackPortAsyncSequence",
             dependencies: [ "Namespace"],
             swiftSettings: [
-                .swiftLanguageVersion(.v6),
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(

@@ -199,7 +199,6 @@ enum MemoryErasing {
                 // memset_s ignore compiler optimization
                 memset_s(ptr, size, 0, size)
                 free(ptr)
-                print("free")
             }
         }
         context.copyDescription = { _ in

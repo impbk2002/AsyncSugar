@@ -10,7 +10,7 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T,
     body: @Sendable (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
 ) async throws -> sending TaskResult {
-    return try await withThrowingTaskGroup(of: Void.self, returning: TaskResult.self) { group in
+    let wrapped:Suppress<TaskResult> = try await withThrowingTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self, isolation: actor) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
         if await holder.isFinished {
             preconditionFailure("SafetyRegion is already used!")
@@ -23,6 +23,7 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
         let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
         async let subTask:Void = {
+            nonisolated(unsafe)
             var iter = suppress.base
             while let _ = try await iter.next(isolation: actor) {
                 if await holder.isFinished {
@@ -31,6 +32,7 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
             }
         }()
         async let mainTask = {
+            nonisolated(unsafe)
             var iter = suppress.base
             do {
                 let v = try await body(actor, &iter)
@@ -51,27 +53,32 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
             group.cancelAll()
             errorRef = error
         }
+        nonisolated(unsafe)
         let value = try await mainTask.base
         if let errorRef {
             throw errorRef
         }
-        return value
+        return Suppress(base: value)
     }
+    return wrapped.base
 }
 
 @inlinable
 package func simuateThrowingDiscardingTaskGroup<TaskResult>(
-    body: @isolated(any) (inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
+    body:  @isolated(any) (inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
 ) async throws -> sending TaskResult {
     guard let actor = body.isolation else {
         preconditionFailure("body must be isolated")
     }
+    nonisolated(unsafe)
+    let block = body
     return try await simuateThrowingDiscardingTaskGroup(isolation: actor) { region, group in
         precondition(actor === region, "must be isolated on the inferred actor")
         nonisolated(unsafe)
         var unsafe = Suppress(base: group)
+        
         do {
-            let value = try await body(&unsafe.base)
+            let value = try await block(&unsafe.base)
             group = unsafe.base
             return value
         } catch {

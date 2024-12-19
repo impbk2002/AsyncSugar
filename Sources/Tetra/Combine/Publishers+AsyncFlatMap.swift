@@ -70,7 +70,7 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         taskExecutor: (any TaskExecutor)? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        typedTransform: @escaping @isolated(any) @Sendable (Upstream.Output) async throws(Failure) -> sending Source
+        typedTransform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> sending Source
     ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source> {
         self.priority = priority
         self.maxTasks = maxTasks
@@ -160,7 +160,7 @@ extension AsyncFlatMap {
         var description: String { "AsyncFlatMap" }
         
         
-        func receive(_ input: sending Input) -> Subscribers.Demand {
+        func receive(_ input: Input) -> Subscribers.Demand {
             valueSource.continuation.yield(.success(input))
             return .none
         }

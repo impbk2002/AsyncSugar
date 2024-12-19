@@ -8,7 +8,7 @@
 
 import Foundation
 @preconcurrency import Combine
-internal import BackPortAsyncSequence
+public import BackPortAsyncSequence
 
 public struct CompatAsyncPublisher<P:Publisher>: AsyncSequence where P.Failure == Never {
 

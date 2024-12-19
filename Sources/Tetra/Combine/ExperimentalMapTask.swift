@@ -20,10 +20,12 @@ public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream
     
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
+    public typealias Transformer = @Sendable @isolated(any) (Upstream.Output) async throws(Failure) -> sending Output
+
     public var priority:TaskPriority? = nil
     public var maxTasks:Subscribers.Demand
     public let upstream:Upstream
-    public let transform: @isolated(any) @Sendable (Upstream.Output) async throws(Failure) -> sending Output
+    public let transform: Transformer
     public let taskExecutor: (any Executor)?
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
@@ -42,7 +44,7 @@ public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream
         priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand = .max(1),
         upstream: Upstream,
-        transform: @Sendable @escaping @isolated(any) (Upstream.Output) async throws(Failure) -> Output
+        transform: @escaping Transformer
     ) {
         precondition(maxTasks != .none, "maxTasks can not be zero")
         self.maxTasks = maxTasks
@@ -58,7 +60,7 @@ public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream
         maxTasks: Subscribers.Demand = .max(1),
         executor:(any TaskExecutor)? = nil,
         upstream: Upstream,
-        transform: @Sendable @escaping @isolated(any) (Upstream.Output) async throws(Failure) -> Output
+        transform: @escaping Transformer
     ) {
         precondition(maxTasks != .none, "maxTasks can not be zero")
         self.maxTasks = maxTasks
@@ -89,13 +91,13 @@ extension MultiMapTask {
         // accessed from Combine intferface or isolated Actor
         // which ever guarantee serialized access
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
-        private let transform:@Sendable (Upstream.Output) async throws(Failure) -> Output
+        private let transform:Transformer
         let combineIdentifier = CombineIdentifier()
         
         init(
             maxTasks:Subscribers.Demand,
             subscriber:S,
-            transform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> Output
+            transform: @escaping Transformer
         ) {
             self.maxTasks = maxTasks
             self.transform = transform

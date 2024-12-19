@@ -44,12 +44,14 @@ public struct BindingCollection<T:MutableCollection>: Collection {
             return binding[position]
         } else {
             nonisolated(unsafe)
-            let index = consume position
+            let index = position
             return .init { [binding] in
                 binding.wrappedValue[index]
             } set: { [binding] newValue, transaction in
+                nonisolated(unsafe)
+                let ref = binding
                 withTransaction(transaction) {
-                    binding.wrappedValue[index] = newValue
+                    ref.wrappedValue[index] = newValue
                 }
             }
 

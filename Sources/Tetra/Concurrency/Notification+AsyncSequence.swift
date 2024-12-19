@@ -8,7 +8,7 @@
 
 import Foundation
 import _Concurrency
-internal import BackPortAsyncSequence
+public import BackPortAsyncSequence
 import Namespace
 
 public import CriticalSection

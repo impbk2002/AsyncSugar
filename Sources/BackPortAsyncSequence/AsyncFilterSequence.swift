@@ -78,7 +78,7 @@ extension BackPort.AsyncFilterSequence.Iterator: AsyncIteratorProtocol, TypedAsy
             guard let element = try await baseIterator.next(isolation: actor) else {
                 return nil
             }
-            do {
+            do throws(Failure) {
                 if try await isIncluded(Suppress(base: element).base) {
                     return element
                 }
