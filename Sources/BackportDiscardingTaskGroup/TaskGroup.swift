@@ -8,7 +8,7 @@
 @inlinable
 package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T = #isolation,
-    body: @Sendable (isolated T, inout TaskGroup<Void>) async -> sending TaskResult
+    body: (isolated T, inout TaskGroup<Void>) async -> sending TaskResult
 ) async -> sending TaskResult {
     let wrapped = await withTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
@@ -32,10 +32,11 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
                 }
             }
         }()
-        
+        nonisolated(unsafe)
+        let body2 = body
         async let mainTask = {
             var iter = suppress.base
-            let v = await body(actor, &iter)
+            let v = await body2(actor, &iter)
             await holder.markDone()
             return Suppress(base: v)
         }()

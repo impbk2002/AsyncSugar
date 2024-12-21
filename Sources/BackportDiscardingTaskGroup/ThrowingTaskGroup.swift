@@ -24,7 +24,7 @@ package func simuateThrowingDiscardingTaskGroup2<TaskResult>(
 @inlinable
 package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T,
-    body: @Sendable (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
+    body: (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
 ) async throws -> sending TaskResult {
     let wrapped:Suppress<TaskResult> = try await withThrowingTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self, isolation: actor) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
@@ -47,18 +47,19 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
                 }
             }
         }()
-        async let mainTask = {
-            nonisolated(unsafe)
+        nonisolated(unsafe)
+        let body2 = body
+        async let mainTask = { (isolation: isolated T) in
             var iter = suppress.base
             do {
-                let v = try await body(actor, &iter)
+                let v = try await body2(isolation, &iter)
                 await holder.markDone()
                 return Suppress(base: v)
             } catch {
                 await holder.markDone()
                 throw error
             }
-        }()
+        }(actor)
         let errorRef:(any Error)?
         do {
             // wait for subTask first to trigger priority elavation

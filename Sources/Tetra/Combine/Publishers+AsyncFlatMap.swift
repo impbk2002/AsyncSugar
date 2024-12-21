@@ -144,14 +144,13 @@ extension AsyncFlatMap {
                 }
             } else {
                 let barrier:SafetyRegion = .init()
-                let block = { (isolation: isolated SafetyRegion) in
-                    try? await simuateThrowingDiscardingTaskGroup2(isolation: isolation) { group in
+                await { (isolation: isolated SafetyRegion) in
+                    try? await simuateThrowingDiscardingTaskGroup(isolation: isolation) {
                         defer { terminateStream() }
-                        await localTask(isolation: isolation, group: &group)
+                        await localTask(isolation: $0, group: &$1)
                     }
                     return ()
-                }
-                await block(barrier)
+                }(barrier)
             }
             send(completion: .finished, shouldCancel: false)
 

@@ -274,12 +274,13 @@ extension MultiMapTask {
                     )
                 }
             } else {
-                await simuateDiscardingTaskGroup(isolation: SafetyRegion()) { @Sendable actor, group in
-                    nonisolated(unsafe)
-                    var unsafe = Suppress(value: group)
-                    await localTask(isolation: actor, group: &unsafe.value)
-                    group = unsafe.value
-                }
+                let barrier = SafetyRegion()
+                await { (a:isolated SafetyRegion) in
+                    await simuateDiscardingTaskGroup(isolation: a) { actor, group in
+                        await localTask(isolation: actor, group: &group)
+                    }
+                    return ()
+                }(barrier)
             }
             // we assume no one is accessing other state
             // except `Subscription.cancel()`
