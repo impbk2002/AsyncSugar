@@ -160,7 +160,7 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
         heaps.withLockUnchecked{ [job] in
             // lastest has the lower id which results lower priority
             let id = -$0.count
-            let item = JobBlock(id: id, jobRef: consume job)
+            let item = JobBlock(id: id, jobRef: job)
             $0.insert(item)
             if #available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *), var max = $0.popMax() {
                 if max.token == nil, let qos, qos.qosClass.rawValue != qos_class, item.priority == max.priority {
@@ -198,7 +198,7 @@ struct RunLoopPriorityQueue: ~Copyable, Sendable {
 }
 
 
-public final class RunLoopPriorityExecutor {
+package final class RunLoopPriorityExecutor {
     
 
     // cache for faster comparsion, RunLoop comparsion trigger creating extra RunLoop

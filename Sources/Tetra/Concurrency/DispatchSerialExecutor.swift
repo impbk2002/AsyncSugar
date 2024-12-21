@@ -8,7 +8,7 @@
 import Foundation
 import Dispatch
 
-public final class DispatchQueueExecutor: SerialExecutor {
+package final class DispatchQueueExecutor: SerialExecutor {
     
     let queue:DispatchQueue
     
