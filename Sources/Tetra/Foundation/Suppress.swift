@@ -11,9 +11,11 @@ import Foundation
 @usableFromInline
 struct Suppress<T>: @unchecked Sendable {
     
+    @inline(__always)
     @usableFromInline
     var value:T
     
+    @inline(__always)
     @usableFromInline
     init(value: T) {
         self.value = value

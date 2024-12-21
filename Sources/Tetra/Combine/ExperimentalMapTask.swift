@@ -183,7 +183,7 @@ extension MultiMapTask {
         private func send(
             isolation actor: isolated some Actor,
             _ value: S.Input
-        ) async throws {
+        ) async throws(CancellationError) {
             
             let (subscriber, subscription) = state.withLockUnchecked{
                 return ($0.subscriber, $0.upstreamSubscription.subscription)
