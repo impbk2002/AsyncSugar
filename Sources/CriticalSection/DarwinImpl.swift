@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if $BuiltinAddressOfRawLayout && canImport(Darwin)
 import Darwin
 
 @frozen
@@ -40,3 +41,4 @@ public struct _MutexHandle: ~Copyable {
   }
 }
 
+#endif

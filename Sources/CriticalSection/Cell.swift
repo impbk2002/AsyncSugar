@@ -4,9 +4,9 @@
 //
 //  Created by 박병관 on 6/26/24.
 //
+#if $BuiltinAddressOfRawLayout
 import Builtin
 import Synchronization
-#if $BuiltinAddressOfRawLayout
 
 @frozen
 @usableFromInline

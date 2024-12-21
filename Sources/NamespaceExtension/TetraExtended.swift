@@ -12,10 +12,10 @@ public protocol TetraExtended {
 
     /// Static Tetra extension point.
     @inlinable
-    static var tetra: TetraExtension<Base>.Type { get set }
+    static var tetra: TetraExtension<Base>.Type { get }
     /// Instance Tetra extension point.
     @inlinable
-    var tetra: TetraExtension<Base> { get set }
+    var tetra: TetraExtension<Base> { get }
 }
 
 extension TetraExtended where Base == Self {
@@ -24,14 +24,12 @@ extension TetraExtended where Base == Self {
     @inlinable
     public static var tetra: TetraExtension<Self>.Type {
         get { TetraExtension<Self>.self }
-        set {}
     }
     
     /// Instance Tetra extension point.
     @inlinable
     public var tetra: TetraExtension<Self> {
         get { TetraExtension(self) }
-        set {}
     }
     
 }

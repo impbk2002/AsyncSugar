@@ -143,13 +143,15 @@ extension AsyncFlatMap {
                     )
                 }
             } else {
-                try? await simuateThrowingDiscardingTaskGroup(isolation: SafetyRegion()) { barrier, group in
-                    defer { terminateStream() }
-                    nonisolated(unsafe)
-                    var unsafe = Suppress(value: group)
-                    await localTask(isolation: barrier, group: &unsafe.value)
-                    group = unsafe.value
+                let barrier:SafetyRegion = .init()
+                let block = { (isolation: isolated SafetyRegion) in
+                    try? await simuateThrowingDiscardingTaskGroup2(isolation: isolation) { group in
+                        defer { terminateStream() }
+                        await localTask(isolation: isolation, group: &group)
+                    }
+                    return ()
                 }
+                await block(barrier)
             }
             send(completion: .finished, shouldCancel: false)
 
@@ -229,8 +231,8 @@ extension AsyncFlatMap {
                     }
                     if let subscription {
                         subscription.request(.max(1))
-                        effect?.run()
                     }
+                    effect?.run()
                 }
             case .success(let success?):
                 send(

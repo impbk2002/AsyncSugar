@@ -67,20 +67,70 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
 /// - Returns: which is returned from body
 /// - SeeAlso: withDiscardingTaskGroup(returning:body:)
 @inlinable
-package func simuateDiscardingTaskGroup<TaskResult>(
-    body: @isolated(any) (inout TaskGroup<Void>) async -> sending TaskResult
-) async -> sending TaskResult {
-    guard let actor = body.isolation else {
-        preconditionFailure("body must be isolated")
+package func simuateDiscardingTaskGroup2<TaskResult>(
+    isolation actor: isolated (any Actor)? = #isolation,
+    body: (inout TaskGroup<Void>) async -> TaskResult
+) async -> TaskResult {
+    guard actor != nil else {
+        preconditionFailure("actor should not be nil")
     }
-    nonisolated(unsafe)
-    let block = body
-    return await simuateDiscardingTaskGroup(isolation: actor) { region, group in
-        precondition(actor === region, "must be isolated on the inferred actor")
+    return await withoutActuallyEscaping(body) { escapingClosure in
+        await __simuateDiscardingTaskGroup2(isolation: actor) { group in
+            let value = await escapingClosure(&group)
+            return Suppress(base: value)
+        }
+    }.base
+}
+
+@usableFromInline
+internal func __simuateDiscardingTaskGroup2<TaskResult>(
+    isolation actor: isolated (any Actor)?,
+    body: @escaping (inout TaskGroup<Void>) async -> sending TaskResult
+) async -> TaskResult {
+    let wrapped:Suppress<TaskResult> = await withTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self, isolation: actor) { group in
+        let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
+        if await holder.isFinished {
+            preconditionFailure("SafetyRegion is already used!")
+        }
+        group.addTask(priority: .background) {
+            /// keep at least one child task alive
+            /// so that subTask won't return
+            await holder.hold()
+        }
+        let suppress = Suppress(base: group)
+        /// drain all the finished or failed Task
+        async let subTask:Void = { (barrier: isolated (any Actor)?) in
+
+            var iter = suppress.base
+            while let _ = await iter.next(isolation: barrier) {
+                if await holder.isFinished {
+                    break
+                }
+            }
+        }(actor)
         nonisolated(unsafe)
-        var unsafe = Suppress(base: group)
-        let value = await block(&unsafe.base)
-        group = unsafe.base
-        return value
+        let body2 = body
+        nonisolated(unsafe)
+        let block2 = { (barrier: isolated (any Actor)?) in
+            var iter = suppress.base
+            return Suppress(base: await body2(&iter))
+        }
+        async let mainTask = {
+            do {
+                let v = await block2(actor)
+                await holder.markDone()
+                return v
+            }
+        }()
+        do {
+            // wait for subTask first to trigger priority elavation
+            // (release finished tasks as soon as possible)
+            await subTask
+        }
+        nonisolated(unsafe)
+        let value = await mainTask.base
+
+        return .init(base: value)
     }
+    return wrapped.base
 }
