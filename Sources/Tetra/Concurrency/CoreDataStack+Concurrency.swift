@@ -33,17 +33,17 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     }
     
     @inlinable
-    public func perform<T>(_ body: () throws -> T) async rethrows -> T {
+    public func perform<T,Failure:Error>(_ body: () throws(Failure) -> T) async throws(Failure) -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
             try await withoutActuallyEscaping(body) { 
                 let block = ClosureHolder(closure: $0)
                 defer {
                     withExtendedLifetime(block, {})
                 }
-                return try await base.perform{ [unowned block] in
-                    try block().get()
+                return await base.perform{ [unowned block] in
+                    block()
                 }
-            }
+            }.get()
         } else {
             try await _perform(body)
         }
@@ -66,9 +66,11 @@ extension TetraExtension where Base: NSPersistentStoreCoordinator {
     }
     
     @inlinable
-    public func performAndWait<T>(_ body: () throws -> T) rethrows -> T {
+    public func performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try base.performAndWait(body)
+            try base.performAndWait{
+                Result(catching: body)
+            }.get()
         } else {
             try _performAndWait(body)
         }
@@ -188,9 +190,9 @@ extension TetraExtension where Base: NSManagedObjectContext {
     }
     
     @inlinable
-    public func performAndWait<T>(_ body: () throws -> T) rethrows -> T {
+    public func performAndWait<T,Failure:Error>(_ body: () throws(Failure) -> T) throws(Failure) -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            try base.performAndWait(body)
+            try base.performAndWait{ Result(catching: body) }.get()
         } else {
             try _performAndWait(body)
         }
@@ -201,15 +203,15 @@ extension TetraExtension where Base: NSManagedObjectContext {
 extension TetraExtension where Base: NSPersistentContainer {
     
     @inlinable
-    public func performBackground<T>(_ body: (NSManagedObjectContext) throws -> T) async rethrows -> T {
+    public func performBackground<T,Failure:Error>(_ body: (NSManagedObjectContext) throws(Failure) -> T) async throws(Failure) -> T {
         return if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
             try await withoutActuallyEscaping(body) {
                 let block = CoreDataContextClosureHolder(closure: $0)
                 defer { withExtendedLifetime(block, {}) }
-                return try await base.performBackgroundTask{ [unowned block] in
-                    try block($0).get()
+                return await base.performBackgroundTask{ [unowned block] in
+                    block($0)
                 }
-            }
+            }.get()
         } else {
             try await _performBackground(body)
         }

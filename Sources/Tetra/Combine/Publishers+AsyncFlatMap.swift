@@ -15,7 +15,7 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
     
     typealias Output = Segment.Element
     typealias Failure = Upstream.Failure
-    typealias Transform = @Sendable (Upstream.Output) async throws(Failure) -> sending Segment
+    typealias Transform = @Sendable (Upstream.Output) async throws(Failure) -> Segment
     var priority: TaskPriority? = nil
     let taskExecutor: (any Executor)?
     var maxTasks:Subscribers.Demand
@@ -52,7 +52,7 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        transform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> sending Source
+        transform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> Source
     ) where Source: AsyncSequence, Segment == LegacyTypedAsyncSequence<Source>, Failure == any Error {
         self.priority = priority
         self.maxTasks = maxTasks
@@ -70,7 +70,7 @@ struct AsyncFlatMap<Upstream:Publisher, Segment:AsyncSequence>: Publisher where 
         taskExecutor: (any TaskExecutor)? = nil,
         maxTasks: Subscribers.Demand,
         upstream: Upstream,
-        typedTransform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> sending Source
+        typedTransform: @escaping @Sendable (Upstream.Output) async throws(Failure) -> Source
     ) where Source: AsyncSequence, Segment == WrappedAsyncSequence<Source> {
         self.priority = priority
         self.maxTasks = maxTasks
@@ -89,7 +89,7 @@ extension AsyncFlatMap {
     struct Inner<Down:Subscriber>: Subscriber, Sendable, Subscription, CustomStringConvertible, CustomPlaygroundDisplayConvertible
     where Segment.Element == Down.Input, Down.Failure == AsyncFlatMap.Failure {
         
-        typealias Transformer = @Sendable (Upstream.Output) async throws(Failure) -> sending Segment
+        typealias Transformer = @Sendable (Upstream.Output) async throws(Failure) -> Segment
         typealias Input = Upstream.Output
         typealias Failure = Upstream.Failure
         
