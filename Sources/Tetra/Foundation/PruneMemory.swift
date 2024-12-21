@@ -7,6 +7,7 @@
 
 import Foundation
 
+#if canImport(ObjectiveC)
 
 
 // since core foundation and objective-c foundation has it's internal optimzation
@@ -228,3 +229,12 @@ enum MemoryErasing {
     
 }
 
+#else
+
+@available(*, unavailable)
+enum MemoryErasing {
+    
+    
+}
+
+#endif
