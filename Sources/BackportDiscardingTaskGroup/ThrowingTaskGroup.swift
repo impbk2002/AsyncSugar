@@ -24,7 +24,7 @@ package func simuateThrowingDiscardingTaskGroup2<TaskResult>(
 @inlinable
 package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T,
-    body: (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> sending TaskResult
+    body: (isolated T, inout ThrowingTaskGroup<Void, any Error>) async throws -> TaskResult
 ) async throws -> sending TaskResult {
     let wrapped:Suppress<TaskResult> = try await withThrowingTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self, isolation: actor) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
@@ -38,15 +38,15 @@ package func simuateThrowingDiscardingTaskGroup<T:Actor,TaskResult>(
         }
         let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
-        async let subTask:Void = {
-            nonisolated(unsafe)
+        async let subTask:Void = { (barrier: isolated T) in
+//            nonisolated(unsafe)
             var iter = suppress.base
-            while let _ = try await iter.next(isolation: actor) {
+            while let _ = try await iter.next(isolation: barrier) {
                 if await holder.isFinished {
                     break
                 }
             }
-        }()
+        }(actor)
         nonisolated(unsafe)
         let body2 = body
         async let mainTask = { (isolation: isolated T) in
@@ -97,33 +97,30 @@ internal func __simuateThrowingDiscardingTaskGroup2<TaskResult>(
         }
         let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
-        async let subTask:Void = {
+        async let subTask:Void = {(barrier: isolated (any Actor)?) in
             nonisolated(unsafe)
             var iter = suppress.base
-            while let _ = try await iter.next(isolation: actor) {
+            while let _ = try await iter.next(isolation: barrier) {
                 if await holder.isFinished {
                     break
                 }
             }
-        }()
+        }(#isolation)
         nonisolated(unsafe)
         let body2 = body
-        nonisolated(unsafe)
-        let block2 = { (barrier: isolated (any Actor)?) in
-            nonisolated(unsafe)
-            var iter = suppress.base
-            return Suppress(base: try await body2(&iter))
-        }
-        async let mainTask = {
+        async let mainTask = { (barrier: isolated (any Actor)?) in
             do {
-                let v = try await block2(actor)
+                nonisolated(unsafe)
+                var iter = suppress.base
+                
+                let v = try await body2(&iter)
                 await holder.markDone()
-                return v
+                return Suppress(base: v)
             } catch {
                 await holder.markDone()
                 throw error
             }
-        }()
+        }(#isolation)
         let errorRef:(any Error)?
         do {
             // wait for subTask first to trigger priority elavation

@@ -5,10 +5,12 @@
 //  Created by 박병관 on 6/20/24.
 //
 
-@inlinable
+internal import CriticalSection
+
+@usableFromInline
 package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
     isolation actor: isolated T = #isolation,
-    body: (isolated T, inout TaskGroup<Void>) async -> sending TaskResult
+    body: (isolated T, inout TaskGroup<Void>) async -> TaskResult
 ) async -> sending TaskResult {
     let wrapped = await withTaskGroup(of: Void.self, returning: Suppress<TaskResult>.self) { group in
         let holder: SafetyRegion = actor as? SafetyRegion ?? .init()
@@ -23,23 +25,23 @@ package func simuateDiscardingTaskGroup<T:Actor,TaskResult>(
         }
         let suppress = Suppress(base: group)
         /// drain all the finished or failed Task
-        async let subTask:Void = {
-            nonisolated(unsafe)
+        async let subTask:Void = { (act: isolated T) in
+//            nonisolated(unsafe)
             var iter = suppress.base
-            while let _ =  await iter.next(isolation: actor) {
+            while let _ =  await iter.next(isolation: act) {
                 if await holder.isFinished {
                     break
                 }
             }
-        }()
+        }(actor)
         nonisolated(unsafe)
         let body2 = body
-        async let mainTask = {
+        async let mainTask = { (act: isolated T) in
             var iter = suppress.base
-            let v = await body2(actor, &iter)
+            let v = await body2(act, &iter)
             await holder.markDone()
             return Suppress(base: v)
-        }()
+        }(actor)
         await subTask
         let value = await mainTask.base
         return Suppress(base: value)
@@ -111,18 +113,12 @@ internal func __simuateDiscardingTaskGroup2<TaskResult>(
         }(actor)
         nonisolated(unsafe)
         let body2 = body
-        nonisolated(unsafe)
-        let block2 = { (barrier: isolated (any Actor)?) in
+        async let mainTask = { (barrier: isolated (any Actor)?) in
             var iter = suppress.base
-            return Suppress(base: await body2(&iter))
-        }
-        async let mainTask = {
-            do {
-                let v = await block2(actor)
-                await holder.markDone()
-                return v
-            }
-        }()
+            let v = await body2(&iter)
+            await holder.markDone()
+            return Suppress(base: v)
+        }(actor)
         do {
             // wait for subTask first to trigger priority elavation
             // (release finished tasks as soon as possible)
@@ -134,4 +130,8 @@ internal func __simuateDiscardingTaskGroup2<TaskResult>(
         return .init(base: value)
     }
     return wrapped.base
+}
+
+extension Suppress: BitwiseCopyable where Base: BitwiseCopyable {
+
 }

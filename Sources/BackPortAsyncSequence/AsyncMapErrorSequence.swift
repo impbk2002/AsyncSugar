@@ -5,6 +5,8 @@
 //  Created by 박병관 on 6/13/24.
 //
 
+import Namespace
+
 public struct AsyncMapErrorSequence<Base:AsyncSequence, Failure:Error> where Base.AsyncIterator: TypedAsyncIteratorProtocol {
     
     @usableFromInline

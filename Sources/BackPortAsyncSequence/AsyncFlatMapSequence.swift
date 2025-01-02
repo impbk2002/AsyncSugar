@@ -97,12 +97,12 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
                     return nil
                 }
                 let block = transform
-                let wrapper = {
-                    let a = try await block($0)
+                let wrapper = { (input:Suppress<Base.Element>) async throws(Failure) in
+                    let a = try await block(input.base)
                     return Suppress(base: a)
                 }
-                do {
-                    let segment: SegmentOfResult = try await wrapper(Suppress(base: item).base).base
+                do throws(Failure) {
+                    let segment: SegmentOfResult = try await wrapper(.init(base: item)).base
                     var iterator = segment.makeAsyncIterator()
                     guard let element = try await iterator.next(isolation: actor) else {
                         currentIterator = nil
@@ -113,7 +113,7 @@ extension BackPort.AsyncFlatMapSequence.Iterator: AsyncIteratorProtocol, TypedAs
                 } catch {
                     finished = true
                     currentIterator = nil
-                    throw error as! Failure
+                    throw error 
                 }
             }
         }

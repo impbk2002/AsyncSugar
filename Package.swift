@@ -65,6 +65,7 @@ let package = Package(
             name: "BackportDiscardingTaskGroup",
             dependencies: [
                 "Namespace",
+                "CriticalSection",
             ],
             swiftSettings: [
                 .enableUpcomingFeature("FullTypedThrows"),
