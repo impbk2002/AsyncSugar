@@ -161,7 +161,7 @@ extension AsyncSequencePublisher {
             }?.run()
         }
         
-        private func waitForCondition() async throws {
+        private func waitForCondition( _ actor: isolated (any Actor)? = #isolation) async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -169,7 +169,7 @@ extension AsyncSequencePublisher {
             }
         }
         
-        private func nextDemand() async -> Subscribers.Demand? {
+        private func nextDemand( _ actor: isolated (any Actor)? = #isolation) async -> Subscribers.Demand? {
             await withUnsafeContinuation{ continuation in
                 let demand:Subscribers.Demand? = state.withLock{
                     if $0.demand > .none {

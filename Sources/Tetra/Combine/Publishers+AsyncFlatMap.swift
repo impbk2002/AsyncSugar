@@ -295,7 +295,7 @@ extension AsyncFlatMap {
         }
         
         // contention case
-        private func waitForUpStream() async throws {
+        private func waitForUpStream( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withTaskCancellationHandler {
                 try await withUnsafeThrowingContinuation { coninuation in
                     lock.withLockUnchecked{
@@ -317,7 +317,7 @@ extension AsyncFlatMap {
         }
         
         // contention case
-        private func waitForCondition() async throws {
+        private func waitForCondition( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 lock.withLock{
                     $0.taskCondition.transition(.suspend(continuation))

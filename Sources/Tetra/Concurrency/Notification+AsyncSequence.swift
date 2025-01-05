@@ -11,6 +11,7 @@ import _Concurrency
 public import BackPortAsyncSequence
 import Namespace
 
+internal import struct DequeModule.Deque
 public import CriticalSection
 
 
@@ -52,7 +53,8 @@ public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequ
                 operation: { [parent] in
                     await parent.next(isolation: actor)
                 },
-                onCancel: parent.cancel
+                onCancel: parent.cancel,
+                isolation: actor
             )
         }
         
@@ -66,12 +68,25 @@ public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequ
     
     @usableFromInline
     internal struct NotficationState {
-        @usableFromInline
-        var buffer:[Notification] = []
-        @usableFromInline
-        var pending:[UnsafeContinuation<Notification?,Never>] = []
+//        @usableFromInline
+        var buffer:Deque<Notification> = []
+//        @usableFromInline
+        var pending:Deque<UnsafeContinuation<Notification?,Never>> = []
         @usableFromInline
         var observer:NSObjectProtocol?
+        
+        @usableFromInline
+        mutating func resume(_ value:Notification) -> UnsafeContinuation<Notification?,Never>? {
+            let captured = pending.first
+
+            if pending.isEmpty {
+                buffer.append(value)
+            } else {
+                pending.removeFirst()
+            }
+            return captured
+        }
+
     }
     
     @inlinable
@@ -84,14 +99,7 @@ public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequ
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
 
             let continuation = lock.withLockUnchecked { state in
-                let captured = state.pending.first
-
-                if state.pending.isEmpty {
-                    state.buffer.append(notification)
-                } else {
-                    state.pending.removeFirst()
-                }
-                return captured
+                return state.resume(notification)
             }
             continuation?.resume(returning: Suppress(value: notification).value)
         }
@@ -122,8 +130,8 @@ public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequ
     }
     
     @usableFromInline
-    func next(isolation: isolated (any Actor)?) async -> Notification? {
-        await withUnsafeContinuation { continuation in
+    func next(isolation: isolated (any Actor)? = #isolation) async -> Notification? {
+        await withUnsafeContinuation(isolation: isolation) { continuation in
             let (notification, isCancelled) = lock.withLockUnchecked { state in
                 if !state.buffer.isEmpty {
                     return (state.buffer.removeFirst() as Notification?, false)

@@ -212,7 +212,7 @@ extension MultiMapTask {
             }
         }
 
-        private func waitForUpStream() async throws {
+        private func waitForUpStream( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withTaskCancellationHandler {
                 try await withUnsafeThrowingContinuation { coninuation in
                     state.withLockUnchecked{
@@ -232,7 +232,7 @@ extension MultiMapTask {
             }?.run()
         }
         
-        private func waitForCondition() async throws {
+        private func waitForCondition( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))

@@ -154,7 +154,7 @@ extension MapTask {
             valueSource.continuation.finish()
         }
         
-        private func waitForUpStream() async throws {
+        private func waitForUpStream( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withTaskCancellationHandler {
                 try await withUnsafeThrowingContinuation { coninuation in
                     state.withLockUnchecked{
@@ -174,7 +174,7 @@ extension MapTask {
             }?.run()
         }
         
-        private func waitForCondition() async throws {
+        private func waitForCondition( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -190,7 +190,7 @@ extension MapTask {
         
         @Sendable
         nonisolated func run() async {
-            let token:Void? = try? await waitForCondition()
+            let token:Void? = try? await waitForCondition(isolation: transform.isolation)
             if token == nil {
                 withUnsafeCurrentTask{
                     $0?.cancel()
@@ -199,7 +199,7 @@ extension MapTask {
             defer {
                 clearCondition()
             }
-            let success: Void? = try? await waitForUpStream()
+            let success: Void? = try? await waitForUpStream(isolation: transform.isolation)
             defer { terminateStream() }
             state.withLockUnchecked{
                 $0.subscriber
