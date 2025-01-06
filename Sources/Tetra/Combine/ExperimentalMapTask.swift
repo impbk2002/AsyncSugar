@@ -260,9 +260,10 @@ extension MultiMapTask {
             }
             // contention can happen with `receive(subscription:)
             let success:Void? = try? await waitForUpStream()
-            state.withLockUnchecked{
+            async let job:Void? = state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
+            await job
             guard success != nil else {
                 terminateStream()
                 return

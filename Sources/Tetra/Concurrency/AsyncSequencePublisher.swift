@@ -204,9 +204,13 @@ extension AsyncSequencePublisher {
             if token == nil {
                 send(completion: nil)
             }
-            state.withLockUnchecked{
-                $0.subscriber
-            }?.receive(subscription: self)
+            
+            async let job:Void = { (actor:isolated (any Actor)?) in
+                state.withLockUnchecked{
+                    $0.subscriber
+                }?.receive(subscription: self)
+            }(actor)
+            await job
             do {
                 while var pending = await nextDemand() {
                     while pending > .none {

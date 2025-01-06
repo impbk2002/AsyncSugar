@@ -8,6 +8,17 @@
 import Foundation
 import os
 
+@usableFromInline
+internal final class LockBuffer<State,Primitive>: ManagedBuffer<State,Primitive> {
+    
+    @usableFromInline
+    deinit {
+        self.withUnsafeMutablePointerToElements{
+            let _ = $0.deinitialize(count: 1)
+        }
+    }
+}
+
 @available(iOS, deprecated: 16.0, renamed: "OSAllocatedUnfairLock")
 @available(tvOS, deprecated: 16.0, renamed: "OSAllocatedUnfairLock")
 @available(macCatalyst, deprecated: 16.0, renamed: "OSAllocatedUnfairLock")
@@ -31,7 +42,7 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     ///
     @inlinable
     public init(uncheckedState initialState: State) {
-        __lock = .create(minimumCapacity: 1) { buffer in
+        __lock = LockBuffer.create(minimumCapacity: 1) { buffer in
             buffer.withUnsafeMutablePointerToElements{ $0.initialize(to: .init()) }
             return initialState
         }
@@ -139,7 +150,7 @@ public extension ManagedUnfairLock where State == Void {
     /// Initialize an SwiftUnfairLock with no protected state.
     @inlinable
     init() {
-        __lock = .create(minimumCapacity: 1) { buffer in
+        __lock = LockBuffer.create(minimumCapacity: 1) { buffer in
             buffer.withUnsafeMutablePointerToElements{ $0.initialize(to: .init()) }
         }
     }

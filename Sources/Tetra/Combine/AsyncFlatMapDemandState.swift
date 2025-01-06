@@ -7,7 +7,7 @@
 
 import Foundation
 import Combine
-internal import DequeModule
+internal import struct DequeModule.Deque
 
 struct AsyncFlatMapDemandState: Sendable {
     

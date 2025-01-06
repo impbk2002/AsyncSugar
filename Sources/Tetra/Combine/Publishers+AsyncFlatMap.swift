@@ -128,9 +128,10 @@ extension AsyncFlatMap {
                 clearCondition()
             }
             let success:Void? = try? await waitForUpStream()
-            lock.withLockUnchecked{
+            async let job:Void? = lock.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
+            await job
             guard success != nil else {
                 terminateStream()
                 return
