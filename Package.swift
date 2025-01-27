@@ -92,6 +92,21 @@ let package = Package(
             ]
         ),
         .target(
+            name: "TetraConcurrentQueueShim",
+            linkerSettings: [
+                .linkedFramework("CoreFoundation")
+            ]
+        ),
+        .target(
+            name: "TetraRunLoopConcurrency",
+            dependencies: [
+                "TetraConcurrentQueueShim",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
+        ),
+        .target(
             name: "BackPortAsyncSequence",
             dependencies: [ "Namespace"],
             swiftSettings: [
@@ -108,5 +123,6 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         )
-    ]
+    ],
+    cxxLanguageStandard: .cxx17
 )
