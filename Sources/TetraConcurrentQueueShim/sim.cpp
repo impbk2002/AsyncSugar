@@ -12,7 +12,6 @@
 #if __APPLE__
 #include <os/lock.h>
 #endif
-//#undef __APPLE__
 
 struct CFQueueTrait: moodycamel::ConcurrentQueueDefaultTraits {
     CF_INLINE void* malloc(size_t size) {
@@ -25,169 +24,78 @@ struct CFQueueTrait: moodycamel::ConcurrentQueueDefaultTraits {
 };
 
 
-
+//#undef __APPLE__
 typedef std::shared_ptr<const void> CFCppRef;
 typedef moodycamel::ConcurrentQueue<CFCppRef, CFQueueTrait> MyConcurrentQueue;
 
-
-bool enqueue_ref_concurrent_queue(void* queue, CFTypeRef ref) {
-    auto q = reinterpret_cast<MyConcurrentQueue *>(queue);
-    auto ptr = CFCppRef(CFRetain(ref), CFRelease);
+typedef struct {
+    MyConcurrentQueue queue;
+    moodycamel::ConsumerToken token;
+    TetraContextData context;
+    CFTypeRef state;
+    CFMutableDictionaryRef runLoopRegistry;
+#if __APPLE__
+    os_unfair_lock_s lock;
+#else
+    std::mutex* lock;
+#endif
     
-    return q->enqueue(std::move(ptr));
-}
-
-CFTypeRef dequeue_ref_concurrent_queue(void* queue) {
-    auto q = reinterpret_cast<MyConcurrentQueue *>(queue);
-    CFCppRef ptr;
-    
-    if (q->try_dequeue(ptr)) {
-        return ptr.get();
-    }
-    return nullptr;
-}
-
-CF_INLINE CFAllocatorContext create_defaultContext(void) {
-    CFAllocatorContext context = {
-        0,
-        (void*)(kCFAllocatorDefault),
-        [](CFTypeRef ref) { return ref ? CFRetain(ref) : ref; },
-        [](CFTypeRef ref) { ref ? CFRelease(ref) : void(); },
-        [](CFTypeRef ref) { return ref ? CFCopyDescription(ref) : nullptr; },
-        [](CFIndex allocSize, CFOptionFlags hint, void *info) { return CFAllocatorAllocate(kCFAllocatorDefault, allocSize, hint); },
-        [](void *ptr, CFIndex newsize, CFOptionFlags hint, void *info) { return CFAllocatorReallocate(kCFAllocatorDefault, ptr, newsize, hint); },
-        [](void *ptr, void *info) { CFAllocatorDeallocate(kCFAllocatorDefault, ptr); },
-        [](CFIndex size, CFOptionFlags hint, void *info) { return CFAllocatorGetPreferredSizeForSize(kCFAllocatorDefault, size, hint); }
-    };
-    return context;
-}
-
-CF_INLINE CFDataRef create_wrapped_queue() {
-    constexpr std::size_t queueSize = sizeof(MyConcurrentQueue);
-    auto queueBuffer = CFQueueTrait::malloc(queueSize);
-    CFAllocatorContext context = {};
-    context.deallocate = [](void *ptr, void *info) {
-        auto q = reinterpret_cast<MyConcurrentQueue *>(ptr);
-        const auto count = q->size_approx();
-        assert(count == 0);
-        q->~ConcurrentQueue();
-        CFQueueTrait::free(q);
-    };
-    auto queue = new (queueBuffer) MyConcurrentQueue();
-    CFAllocatorRef deallocator = CFAllocatorCreate(kCFAllocatorDefault, &context);
-    CFDataRef queueWrapper = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(queueBuffer), queueSize, deallocator);
-    CFRelease(deallocator);
-    return queueWrapper;
-}
-
-CF_INLINE CFDataRef create_wrapped_token(MyConcurrentQueue& queue) {
-    constexpr std::size_t tokenSize = sizeof(moodycamel::ConsumerToken);
-    auto tokenBuffer = CFQueueTrait::malloc(tokenSize);
-    CFAllocatorContext context = {};
-    auto token = new (tokenBuffer) moodycamel::ConsumerToken(queue);
-    context.deallocate = [](void *ptr, void *info) {
-        auto t = reinterpret_cast<moodycamel::ConsumerToken *>(ptr);
-        t->~ConsumerToken();
-        CFQueueTrait::free(t);
-    };
-    CFAllocatorRef deallocator = CFAllocatorCreate(kCFAllocatorDefault, &context);
-    CFDataRef tokenWrapper = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(tokenBuffer), tokenSize, deallocator);
-    CFRelease(deallocator);
-    return tokenWrapper;
-}
-
-
+} RunLoopContextInfo;
 
 CFRunLoopSourceRef create_tetra_runLoop_executor(
     CFTypeRef initialState,
     const TetraContextData *tetraContext
 ) {
-    CFDataRef queueWrapper = create_wrapped_queue();
-    CFDataRef tokenWrapper = create_wrapped_token(
-                                                  *reinterpret_cast<MyConcurrentQueue *>(const_cast<UInt8 *>(CFDataGetBytePtr(queueWrapper)))
-                                                  );
-    CFDataRef contextStorage = CFDataCreate(kCFAllocatorDefault, (UInt8 *)tetraContext, sizeof(TetraContextData));
-    auto registryContext = create_defaultContext();
-    registryContext.retain = [](CFTypeRef ref) -> CFTypeRef {
+    auto queue = MyConcurrentQueue();
+    auto token = moodycamel::ConsumerToken(queue);
+    
+    RunLoopContextInfo stackInfo = RunLoopContextInfo{
+        std::move(queue),
+        std::move(token),
+        *tetraContext,
+        initialState,
+        CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks),
 #if __APPLE__
-        constexpr size_t size = sizeof(os_unfair_lock_s);
+        OS_UNFAIR_LOCK_INIT,
 #else
-        constexpr size_t size = sizeof(std::mutex);
+        new (CFQueueTrait::malloc(sizeof(std::mutex))) std::mutex(),
 #endif
-        auto buffer = CFAllocatorAllocate(kCFAllocatorDefault, size, 0);
-        
-#if __APPLE__
-        os_unfair_lock_t mutex = new (buffer) os_unfair_lock_s(OS_UNFAIR_LOCK_INIT);
-#else
-        auto mutex = new (buffer) std::mutex;
-#endif
-        
-        return buffer;
     };
-    registryContext.copyDescription = nullptr;
-    registryContext.release = [](CFTypeRef ref) {
-#if __APPLE__
-        auto lock = reinterpret_cast<os_unfair_lock_t>(const_cast<void*>(ref));
-        lock->~os_unfair_lock_s();
-#else
-        auto mutex = reinterpret_cast<std::mutex *>(const_cast<void*>(ref));
-        mutex->~mutex();
-#endif
-        CFAllocatorDeallocate(kCFAllocatorDefault, const_cast<void*>(ref));
-    };
-    CFAllocatorRef registryDeallocator = CFAllocatorCreate(kCFAllocatorDefault, &registryContext);
-    CFMutableDictionaryRef runLoopRegistry = CFDictionaryCreateMutable(registryDeallocator, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, (CFTypeRef []){queueWrapper, tokenWrapper, initialState, contextStorage, runLoopRegistry}, 5, &kCFTypeArrayCallBacks);
-    CFRelease(queueWrapper);
-    CFRelease(tokenWrapper);
-    CFRelease(contextStorage);
-    CFRelease(runLoopRegistry);
-    CFRelease(registryDeallocator);
-//    CFRelease(initialState);
-    /**
-        [
-            queue,
-            consumerToken,
-            userDefinedState,
-            contextCallbackStorage
-     ]
-     **/
     CFRunLoopSourceContext soureContext = {
         0,
-        (void*)array,
-        CFRetain,
-        CFRelease,
-        [](CFTypeRef ref) -> CFStringRef {
-            CFArrayRef array = reinterpret_cast<CFArrayRef>(ref);
-            CFTypeRef buffer[] = {
-                CFStringCreateWithCString(kCFAllocatorDefault, "moody::camel::ConcurrentQueue", kCFStringEncodingUTF8),
-                CFStringCreateWithCString(kCFAllocatorDefault, "moody::camel::ConsumerToken", kCFStringEncodingUTF8),
-                CFArrayGetValueAtIndex(array, 2),
-                CFStringCreateWithCString(kCFAllocatorDefault, "TetraContextStorage", kCFStringEncodingUTF8),
-                CFStringCreateWithCString(kCFAllocatorDefault, "RunLoopRegistry", kCFStringEncodingUTF8),
-            };
-            CFArrayRef temp = CFArrayCreate(kCFAllocatorDefault, buffer, 5, &kCFTypeArrayCallBacks);
-            CFStringRef description = CFCopyDescription(temp);
-            CFRelease(temp);
-            return description;
+        (void*)&stackInfo,
+        [](const void * stackRawInfo) -> const void * {
+            void * buffer = CFAllocatorAllocate(kCFAllocatorDefault, sizeof(RunLoopContextInfo), 0);
+            RunLoopContextInfo* stackInfo = reinterpret_cast<RunLoopContextInfo*>(const_cast<void*>(stackRawInfo));
+            
+            auto myInfo = new (buffer) RunLoopContextInfo(std::move(*stackInfo));
+            myInfo->state = CFRetain(stackInfo->state);
+            return myInfo;
         },
-        CFEqual,
-        CFHash,
+        [](const void * heapRawInfo) {
+            auto info = reinterpret_cast<RunLoopContextInfo*>(const_cast<void*>(heapRawInfo));
+#if !__APPLE__
+            info->lock->~mutex();
+            CFQueueTrait::free(info->lock);
+#endif
+            auto stack = std::move(*info);
+            CFAllocatorDeallocate(kCFAllocatorDefault, info);
+            CFRelease(stack.runLoopRegistry);
+            CFRelease(stack.state);
+        },
+        nullptr,
+        nullptr,
+        nullptr,
         [](void * info, CFRunLoopRef runLoop, CFRunLoopMode mode) {
             //schedule
-            auto array = static_cast<CFArrayRef>(info);
-            CFTypeRef state = CFArrayGetValueAtIndex(array, 2);
-            CFDataRef context = (CFDataRef) CFArrayGetValueAtIndex(array, 3);
-            auto tetraContext = (TetraContextData *)CFDataGetBytePtr(context);
+            auto &sourceInfo = *reinterpret_cast<RunLoopContextInfo *>(info);
             CFRunLoopWakeUp(runLoop);
             {
-                CFMutableDictionaryRef registry = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(array, 4);
-                CFAllocatorContext allocContext = {};
-                CFAllocatorGetContext(CFGetAllocator(registry),&allocContext);
+                CFMutableDictionaryRef registry = sourceInfo.runLoopRegistry;
 #if __APPLE__
-                os_unfair_lock_lock((os_unfair_lock_t)allocContext.info);
+                os_unfair_lock_lock(&sourceInfo.lock);
 #else
-                std::lock_guard<std::mutex> lock(*(std::mutex *)allocContext.info);
+                std::lock_guard<std::mutex> lock(*sourceInfo.lock);
 #endif
                 CFMutableSetRef set = (CFMutableSetRef)CFDictionaryGetValue(registry, runLoop);
                 if (!set) {
@@ -196,29 +104,24 @@ CFRunLoopSourceRef create_tetra_runLoop_executor(
                     CFRelease(set);
                 }
 #if __APPLE__
-                os_unfair_lock_unlock((os_unfair_lock_t)allocContext.info);
+                os_unfair_lock_unlock(&sourceInfo.lock);
 #endif
                 CFSetAddValue(set, mode);
             }
-            if (tetraContext->schedule) {
-                tetraContext->schedule(state, runLoop, mode);
+            if (sourceInfo.context.schedule) {
+                sourceInfo.context.schedule(sourceInfo.state, runLoop, mode);
             }
         },
         [](void * info, CFRunLoopRef runLoop, CFRunLoopMode mode) {
             // cancel
-            auto array = static_cast<CFArrayRef>(info);
-            CFTypeRef state = CFArrayGetValueAtIndex(array, 2);
-            CFTypeRef context = CFArrayGetValueAtIndex(array, 3);
-            auto tetraContext = (TetraContextData *)CFDataGetBytePtr((CFDataRef)context);
+            auto &sourceInfo = *reinterpret_cast<RunLoopContextInfo *>(info);
             CFRunLoopWakeUp(runLoop);
             {
-                CFMutableDictionaryRef registry = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(array, 4);
-                CFAllocatorContext allocContext = {};
-                CFAllocatorGetContext(CFGetAllocator(registry),&allocContext);
+                CFMutableDictionaryRef registry = sourceInfo.runLoopRegistry;
 #if __APPLE__
-                os_unfair_lock_lock((os_unfair_lock_t)allocContext.info);
+                os_unfair_lock_lock(&sourceInfo.lock);
 #else
-                std::lock_guard<std::mutex> lock(*(std::mutex *)allocContext.info);
+                std::lock_guard<std::mutex> lock(*sourceInfo.lock);
 #endif
                 CFMutableSetRef set = (CFMutableSetRef)CFDictionaryGetValue(registry, runLoop);
 
@@ -228,91 +131,124 @@ CFRunLoopSourceRef create_tetra_runLoop_executor(
                     CFDictionaryRemoveValue(registry, runLoop);
                 }
 #if __APPLE__
-                os_unfair_lock_unlock((os_unfair_lock_t)allocContext.info);
+                os_unfair_lock_unlock(&sourceInfo.lock);
 #endif
             }
-            if (tetraContext->cancel) {
-                tetraContext->cancel(state, runLoop, mode);
+            if (sourceInfo.context.schedule) {
+                sourceInfo.context.schedule(sourceInfo.state, runLoop, mode);
             }
 
         },
         [](void *info) {
-            auto array = static_cast<CFArrayRef>(info);
-            auto queue = reinterpret_cast<MyConcurrentQueue *>((void *)CFDataGetBytePtr((CFDataRef)CFArrayGetValueAtIndex(array, 0)));
-            auto token = reinterpret_cast<moodycamel::ConsumerToken *>((void *)CFDataGetBytePtr((CFDataRef)CFArrayGetValueAtIndex(array, 1)));
-            CFTypeRef state = CFArrayGetValueAtIndex(array, 2);
-            CFTypeRef context = CFArrayGetValueAtIndex(array, 3);
-            auto tetraContext = (TetraContextData *)CFDataGetBytePtr((CFDataRef)context);
+            auto &sourceInfo = *reinterpret_cast<RunLoopContextInfo *>(info);
+            
+
             CFMutableArrayRef dequeue = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
             constexpr size_t buffer_size = 10;
             CFCppRef result[buffer_size];
             size_t size = 0;
-            while ((size = queue->try_dequeue_bulk(*token, result, buffer_size)) > 0) {
+            while ((size = sourceInfo.queue.try_dequeue_bulk(sourceInfo.token, result, buffer_size)) > 0) {
                 for (int i = 0; i < size; i++) {
                     CFCppRef ref = std::move(result[i]);
                     CFArrayAppendValue(dequeue, ref.get());
                 }
             }
-            tetraContext->perform(state, dequeue);
+            sourceInfo.context.perform(sourceInfo.state, dequeue);
             CFRelease(dequeue);
         }
     };
     
     CFRunLoopSourceRef source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &soureContext);
-    CFRelease(array);
     return source;
 }
 
 CFDictionaryRef copy_tetra_runLoop_registry(CFRunLoopSourceRef source) {
-    CFMutableDictionaryRef registry_source;
-    CFDictionaryRef registry;
+    RunLoopContextInfo* info;
     {
         CFRunLoopSourceContext context = {};
         CFRunLoopSourceGetContext(source, &context);
-        CFArrayRef array = reinterpret_cast<CFArrayRef>(context.info);
-        assert(CFGetTypeID(array) == CFArrayGetTypeID());
-        CFTypeRef ref = CFArrayGetValueAtIndex(array, 4);
-//        assert(CFGetTypeID(registry_source) == CFDictionaryGetTypeID());
-        registry_source = reinterpret_cast<CFMutableDictionaryRef>(const_cast<void*>(ref));
+        info = reinterpret_cast<RunLoopContextInfo *>(context.info);
     }
+    RunLoopContextInfo& variable = *info;
+    CFDictionaryRef registry;
     {
-        CFAllocatorContext allocContext = {};
-        CFAllocatorGetContext(CFGetAllocator(registry_source),&allocContext);
 #if __APPLE__
-        os_unfair_lock_lock((os_unfair_lock_t)allocContext.info);
+        os_unfair_lock_lock(&variable.lock);
 #else
-        std::lock_guard<std::mutex> lock(*(std::mutex *)allocContext.info);
+        std::lock_guard<std::mutex> lock(*variable.lock);
 #endif
-        registry = CFDictionaryCreateCopy(kCFAllocatorDefault, registry_source);
+        registry = CFDictionaryCreateCopy(kCFAllocatorDefault, variable.runLoopRegistry);
 #if __APPLE__
-        os_unfair_lock_unlock((os_unfair_lock_t)allocContext.info);
+        os_unfair_lock_unlock(&variable.lock);
 #endif
     }
     return registry;
 }
 
-bool tetra_enqueue_and_signal(CFRunLoopSourceRef source, CFTypeRef ref) {
-    CFArrayRef array;
-    MyConcurrentQueue* queue;
+CF_INLINE CFDictionaryRef try_copy_tetra_runLoop_registry(CFRunLoopSourceRef source) {
+    RunLoopContextInfo* info;
     {
         CFRunLoopSourceContext context = {};
         CFRunLoopSourceGetContext(source, &context);
-        array = static_cast<CFArrayRef>(context.info);
+        info = reinterpret_cast<RunLoopContextInfo *>(context.info);
     }
+    RunLoopContextInfo& variable = *info;
+    CFDictionaryRef registry;
     {
-        CFDataRef queueWrapper = (CFDataRef)CFArrayGetValueAtIndex(array, 0);
-        queue = reinterpret_cast<MyConcurrentQueue *>(const_cast<UInt8 *>(CFDataGetBytePtr(queueWrapper)));
+#if __APPLE__
+        if (os_unfair_lock_trylock(&variable.lock) == false) {
+            return nullptr;
+        }
+#else
+        std::unique_lock<std::mutex> lock(*variable.lock, std::try_to_lock);
+        if(!lock.owns_lock()){
+            return nullptr;
+        }
+#endif
+        registry = CFDictionaryCreateCopy(kCFAllocatorDefault, variable.runLoopRegistry);
+#if __APPLE__
+        os_unfair_lock_unlock(&variable.lock);
+#endif
     }
+    return registry;
+}
+
+
+bool tetra_enqueue_and_signal(CFRunLoopSourceRef source, CFTypeRef ref) {
+    RunLoopContextInfo* info;
+    {
+        CFRunLoopSourceContext context = {};
+        CFRunLoopSourceGetContext(source, &context);
+        info = reinterpret_cast<RunLoopContextInfo *>(context.info);
+    }
+    RunLoopContextInfo& variable = *info;
     auto ptr = CFCppRef(CFRetain(ref), CFRelease);
-    const bool success = queue->enqueue(std::move(ptr));
+    const bool success = variable.queue.enqueue(std::move(ptr));
     if (!success) {
         return false;
     }
     CFRunLoopSourceSignal(source);
-    CFDictionaryRef registry = copy_tetra_runLoop_registry(source);
+    CFDictionaryRef registry = try_copy_tetra_runLoop_registry(source);
+    // somebody is already waking up the runloop
+    if (registry == nullptr) {
+        
+        return true;
+    }
     CFDictionaryApplyFunction(registry, [](CFTypeRef key, CFTypeRef value, void * info) {
-        CFRunLoopWakeUp((CFRunLoopRef) key);
+        if (CFRunLoopIsWaiting((CFRunLoopRef) key)) {
+            CFRunLoopWakeUp((CFRunLoopRef) key);
+        }
     }, nullptr);
     CFRelease(registry);
     return true;
+}
+
+CFTypeRef tetra_get_stateInfo(CFRunLoopSourceRef source) {
+    RunLoopContextInfo* info;
+    {
+        CFRunLoopSourceContext context = {};
+        CFRunLoopSourceGetContext(source, &context);
+        info = reinterpret_cast<RunLoopContextInfo *>(context.info);
+    }
+    return info->state;
 }

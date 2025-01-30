@@ -23,10 +23,17 @@ struct StateStorage {
 }
 
 
+fileprivate actor DummyActor {
+    let unownedExecutor: UnownedSerialExecutor
+    init(unownedExecutor: UnownedSerialExecutor) {
+        self.unownedExecutor = unownedExecutor
+    }
+    
+    func run(_ block: @convention(block) () -> Void) { block() }
+    
+}
 
 final class RunLoopStorageBufferHolder {}
-
-
 
 final package class TetraRunLoopExecutor: NSObject {
     
@@ -102,6 +109,7 @@ package extension TetraRunLoopExecutor {
     
     nonisolated func enqueue(_ job: UnownedJob) {
         tetra_enqueue_and_signal(source, job as AnyObject)
+        let _ = ManagedBufferPointer<StateStorage,Void>(unsafeBufferObject: tetra_get_stateInfo(source))
     }
     
     nonisolated func asUnownedSerialExecutor() -> UnownedSerialExecutor {
@@ -121,7 +129,9 @@ package extension TetraRunLoopExecutor {
         )
     }
     
-    
+    func isSameExclusiveExecutionContext(other: TetraRunLoopExecutor) -> Bool {
+        CFEqual(source, other.source)
+    }
     
 }
 
@@ -135,11 +145,12 @@ extension TetraRunLoopExecutor {
         CFRunLoopAddSource(runLoop.getCFRunLoop(), source, .defaultMode)
     }
     
-    @available(swift, obsoleted: 1.0)
-    @objc
-    package func schedule( _ block: @convention(block) () -> Void) {
-        block()
-    }
+//    @available(swift, obsoleted: 1.0)
+//    @objc
+//    package func schedule( _ block: @convention(block) () -> Void) async {
+//        await DummyActor(unownedExecutor: asUnownedSerialExecutor())
+//            .run(block)
+//    }
     
 }
 

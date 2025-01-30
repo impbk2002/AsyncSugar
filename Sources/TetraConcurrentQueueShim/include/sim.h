@@ -50,6 +50,9 @@ CF_RETURNS_RETAINED CFDictionaryRef copy_tetra_runLoop_registry(CFRunLoopSourceR
 
 bool tetra_enqueue_and_signal(CFRunLoopSourceRef source, CFTypeRef ref);
 
+CF_RETURNS_NOT_RETAINED
+CFTypeRef tetra_get_stateInfo(CFRunLoopSourceRef source);
+
 CF_EXTERN_C_END
 
 //void retainSharedObject(MyBookQueue* ref);
