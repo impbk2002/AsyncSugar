@@ -8,103 +8,112 @@
 
 import Foundation
 import _Concurrency
+public import BackPortAsyncSequence
+import Namespace
 
-extension NotificationCenter: TetraExtended {}
+internal import struct DequeModule.Deque
+public import CriticalSection
+
 
 extension TetraExtension where Base: NotificationCenter {
     
-    func notifications(named: Notification.Name, object: AnyObject? = nil) -> WrappedAsyncSequence<Notification> {
-        if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-            return WrappedAsyncSequence(base: base.notifications(named: named, object: object))
-        } else {
-            return WrappedAsyncSequence(base: NotificationSequence(center: base, named: named, object: object))
-        }
+    @inlinable
+    func notifications(named: Notification.Name, object: AnyObject? = nil) -> NotificationSequence {
+        return NotificationSequence(center: base, named: named, object: object)
     }
     
 }
 
 
-@available(iOS 13.0, tvOS 13.0, macCatalyst 13.0, watchOS 6.0, macOS 10.15, *)
-public extension NotificationCenter {
+public final class NotificationSequence: AsyncSequence, Sendable, TypedAsyncSequence {
     
-    
-    @available(iOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
-    @available(tvOS, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
-    @available(macCatalyst, introduced: 13.0, deprecated: 15.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
-    @available(watchOS, introduced: 6.0, deprecated: 8.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
-    @available(macOS, introduced: 10.15, deprecated: 12.0, renamed: "notifications", message: "use explicit extension method, will be removed on Swift 6")
-    func sequence(named:Notification.Name, object:AnyObject? = nil) -> WrappedAsyncSequence<Notification> {
-        tetra.notifications(named: named, object: object)
-    }
-    
-}
-
-@available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *)
-extension NotificationCenter.Notifications.AsyncIterator: NonThrowingAsyncIteratorProtocol {}
-
-public final class NotificationSequence: AsyncSequence, Sendable {
-    
-    public typealias Element = Notification
     public typealias AsyncIterator = Iterator
+    public typealias Failure = Never
     
     public func makeAsyncIterator() -> Iterator {
         Iterator(parent: self)
     }
     
+    @usableFromInline
     let center: NotificationCenter
-    private let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
+    @usableFromInline
+    let lock:some UnfairStateLock<NotficationState> = createUncheckedStateLock(uncheckedState: NotficationState())
 
-    public struct Iterator: NonThrowingAsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         public typealias Element = Notification
+        public typealias Failure = Never
         
+        @usableFromInline
         let parent:NotificationSequence
-
-        public func next() async -> Notification? {
-//            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
+        
+        @inlinable
+        public func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Never) -> Notification? {
+            //            next를 호출한 동안에 task cancellation이 발생하면 observer Token이 무효화되는 것이 확인되므로 아래와 같이 canellation을 추가한다.
             await withTaskCancellationHandler(
-                operation: parent.next,
-                onCancel: parent.cancel
+                operation: { [parent] in
+                    await parent.next(isolation: actor)
+                },
+                onCancel: parent.cancel,
+                isolation: actor
             )
+        }
+        
+        @_disfavoredOverload
+        @inlinable
+        public func next() async throws(Never) -> Notification? {
+            await next(isolation: nil)
         }
 
     }
     
-    private struct NotficationState {
-        var buffer:[Notification] = []
-        var pending:[UnsafeContinuation<Notification?,Never>] = []
+    @usableFromInline
+    internal struct NotficationState {
+//        @usableFromInline
+        var buffer:Deque<Notification> = []
+//        @usableFromInline
+        var pending:Deque<UnsafeContinuation<Notification?,Never>> = []
+        @usableFromInline
         var observer:NSObjectProtocol?
+        
+        @usableFromInline
+        mutating func resume(_ value:Notification) -> UnsafeContinuation<Notification?,Never>? {
+            let captured = pending.first
+
+            if pending.isEmpty {
+                buffer.append(value)
+            } else {
+                pending.removeFirst()
+            }
+            return captured
+        }
+
     }
     
-    
+    @inlinable
     public init(
         center: NotificationCenter,
         named name: Notification.Name,
         object: AnyObject? = nil
     ) {
-        
         self.center = center
         let observer = center.addObserver(forName: name, object: object, queue: nil) { [lock] notification in
-            lock.withLockUnchecked { state in
-                let captured = state.pending.first
 
-                if state.pending.isEmpty {
-                    state.buffer.append(notification)
-                } else {
-                    state.pending.removeFirst()
-                }
-                return captured
-            }?.resume(returning: notification)
+            let continuation = lock.withLockUnchecked { state in
+                return state.resume(notification)
+            }
+            continuation?.resume(returning: Suppress(value: notification).value)
         }
         lock.withLockUnchecked{
             $0.observer = observer
         }
     }
     
-
+    @inlinable
     deinit {
         cancel()
     }
     
+    @usableFromInline
     @Sendable
     func cancel() {
         let snapShot = lock.withLockUnchecked {
@@ -120,8 +129,9 @@ public final class NotificationSequence: AsyncSequence, Sendable {
         snapShot.pending.forEach{ $0.resume(returning: nil) }
     }
     
-    func next() async -> Notification? {
-        await withUnsafeContinuation { continuation in
+    @usableFromInline
+    func next(isolation: isolated (any Actor)? = #isolation) async -> Notification? {
+        await withUnsafeContinuation(isolation: isolation) { continuation in
             let (notification, isCancelled) = lock.withLockUnchecked { state in
                 if !state.buffer.isEmpty {
                     return (state.buffer.removeFirst() as Notification?, false)

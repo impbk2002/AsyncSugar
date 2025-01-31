@@ -6,8 +6,8 @@
 //
 
 import Foundation
+import Namespace
 
-extension URLSession: TetraExtended {}
 
 @available(iOS 13.0, tvOS 13.0, macCatalyst 13.0, macOS 10.15, watchOS 6.0, *)
 public extension TetraExtension where Base: URLSession {

@@ -5,11 +5,14 @@
 //  Created by pbk on 2023/01/27.
 //
 
-import XCTest
+import Testing
+import Foundation
 @testable import Tetra
 
-final class NotificationSequenceTests: XCTestCase {
+@Suite
+struct NotificationSequenceTests {
 
+    @Test
     func testNotificationSequence() async throws {
         let name = Notification.Name(UUID().uuidString)
         let object = NSObject()
@@ -34,9 +37,10 @@ final class NotificationSequenceTests: XCTestCase {
         task.cancel()
         NotificationCenter.default.post(name: name, object: object, userInfo: ["":""])
         let count = await task.value
-        XCTAssertEqual(count, 2)
+        #expect(count == 2)
     }
     
+    @Test
     func testAlreadyCancelled() async throws {
         let name = Notification.Name(UUID().uuidString)
         let object = NSObject()
@@ -63,7 +67,7 @@ final class NotificationSequenceTests: XCTestCase {
         }
         task.cancel()
         let count = await task.value
-        XCTAssertEqual(count, 0)
+        #expect(count == 0)
     }
 
 }

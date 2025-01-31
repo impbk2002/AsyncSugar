@@ -1,6 +1,6 @@
 //
 //  URLSessionDownloadTask+Concurrency.swift
-//
+//  
 //
 //  Created by pbk on 2022/12/08.
 //
@@ -8,6 +8,7 @@
 import Foundation
 import Dispatch
 import _Concurrency
+internal import CriticalSection
 
 @usableFromInline
 internal func randomDownloadFileURL() -> URL {

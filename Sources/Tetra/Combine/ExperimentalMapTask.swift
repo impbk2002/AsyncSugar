@@ -7,9 +7,8 @@
 
 import Foundation
 @preconcurrency import Combine
-
-
-
+internal import CriticalSection
+internal import BackportDiscardingTaskGroup
 
 /**
     Manage Multiple Child Task. provides similair behavior of `flatMap`'s `maxPublisher`
@@ -17,32 +16,58 @@ import Foundation
     precondition `maxTasks` must be none zero value
  */
 @_spi(Experimental)
-public struct MultiMapTask<Upstream:Publisher, Output:Sendable>: Publisher where Upstream.Output:Sendable {
+public struct MultiMapTask<Upstream:Publisher, Output>: Publisher where Upstream.Output:Sendable {
     
     public typealias Output = Output
     public typealias Failure = Upstream.Failure
+    public typealias Transformer = @Sendable @isolated(any) (Upstream.Output) async throws(Failure) -> sending Output
 
-    public let maxTasks:Subscribers.Demand
+    public var priority:TaskPriority? = nil
+    public var maxTasks:Subscribers.Demand
     public let upstream:Upstream
-    public let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
+    public let transform: Transformer
+    public let taskExecutor: (any Executor)?
     
     public func receive<S>(subscriber: S) where S : Subscriber, Upstream.Failure == S.Failure, Output == S.Input {
         let processor = Inner(maxTasks: maxTasks, subscriber: subscriber, transform: transform)
-        let task = Task(operation: processor.run)
+        let task = if #available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *), let executor = taskExecutor as? (any TaskExecutor) {
+            Task(executorPreference: executor, priority: priority, operation: processor.run)
+        } else {
+            Task(priority: priority, operation: processor.run)
+        }
         processor.resumeCondition(task)
         upstream.subscribe(processor)
     }
     
     
     public init(
+        priority: TaskPriority? = nil,
         maxTasks: Subscribers.Demand = .max(1),
         upstream: Upstream,
-        transform: @Sendable @escaping (Upstream.Output) async -> Result<Output, Failure>
+        transform: @escaping Transformer
     ) {
         precondition(maxTasks != .none, "maxTasks can not be zero")
         self.maxTasks = maxTasks
         self.upstream = upstream
         self.transform = transform
+        self.taskExecutor = nil
+        self.priority = priority
+    }
+    
+    @available(macOS 15.0, iOS 18.0, watchOS 11.0, tvOS 18.0, visionOS 2.0, *)
+    public init(
+        priority:TaskPriority? = nil,
+        maxTasks: Subscribers.Demand = .max(1),
+        executor:(any TaskExecutor)? = nil,
+        upstream: Upstream,
+        transform: @escaping Transformer
+    ) {
+        precondition(maxTasks != .none, "maxTasks can not be zero")
+        self.maxTasks = maxTasks
+        self.upstream = upstream
+        self.transform = transform
+        self.taskExecutor = executor
+        self.priority = priority
     }
     
 }
@@ -54,21 +79,26 @@ extension MultiMapTask {
     struct TaskState<S:Subscriber> where S.Failure == Failure, S.Input == Output {
         var demand = PendingDemandState()
         var subscriber:S? = nil
-        var upstreamSubscription = SubscriptionContinuation.waiting
+        var upstreamSubscription = AsyncSubscriptionState.waiting
         var condition = TaskValueContinuation.waiting
     }
     
+    // this can run serially or in parallel by using demand config, so use adding actor isolation seems quite odd here
     struct Inner<S:Subscriber>: CustomCombineIdentifierConvertible where S.Failure == Failure, S.Input == Output {
         
         private let maxTasks:Subscribers.Demand
         private let valueSource = AsyncStream<Result<Upstream.Output, Failure>>.makeStream()
-        private let demandSource = AsyncStream<Subscribers.Demand>.makeStream()
+        // accessed from Combine intferface or isolated Actor
+        // which ever guarantee serialized access
         private let state: some UnfairStateLock<TaskState<S>> = createUncheckedStateLock(uncheckedState: TaskState<S>())
-        private let transform:@Sendable (Upstream.Output) async -> Result<Output,Failure>
-
+        private let transform:Transformer
         let combineIdentifier = CombineIdentifier()
         
-        init(maxTasks:Subscribers.Demand, subscriber:S, transform: @escaping @Sendable (Upstream.Output) async -> Result<Output,Failure>) {
+        init(
+            maxTasks:Subscribers.Demand,
+            subscriber:S,
+            transform: @escaping Transformer
+        ) {
             self.maxTasks = maxTasks
             self.transform = transform
             state.withLockUnchecked{
@@ -76,38 +106,46 @@ extension MultiMapTask {
             }
         }
         
-        private func localTask(
-            subscription: any Subscription,
-            group: inout some CompatThrowingDiscardingTaskGroup
+//        private func prepareTermination(cancel:Bool) {
+//            let effect = state.withLockUnchecked {
+//                let effect1 = $0.condition.transition(cancel ? .cancel : .finish)
+//                let effect2 = $0.upstreamSubscription.transition(cancel ? .cancel : .finish)
+//                return (effect1, effect2)
+//            }
+//            effect.0?.run()
+//            effect.1?.run()
+//        }
+        
+        internal func localTask(
+            isolation actor: isolated (any Actor)? = #isolation,
+            group: inout some CompatDiscardingTaskGroup<NoThrow>
         ) async {
-            group.addTask(priority: nil) {
-                for await demand in demandSource.stream {
-                    let nextDemand = receive(demand: demand)
-                    if nextDemand > .none {
-                        subscription.request(nextDemand)
-                    }
+            let barrier = actor as? SafetyRegion ?? SafetyRegion()
+            
+            for await event in valueSource.stream {
+                if await barrier.isFinished {
+                    break
                 }
-            }
-            var iterator = valueSource.stream.makeAsyncIterator()
-            while let upstreamValue = await iterator.next() {
-                switch upstreamValue {
+                switch event {
                 case .failure(let failure):
-                    send(completion: .failure(failure), cancel: false)
+                    await barrier.markDone()
+                    // no contention except `request` and `cancel`
+                    await send(barrier: barrier, completion: .failure(failure), cancel: false)
                     break
                 case .success(let success):
                     let flag = group.addTaskUnlessCancelled(priority: nil) {
-                        switch await transform(success) {
-                        case .failure(let failure):
-                            send(completion: .failure(failure), cancel: true)
-                            throw CancellationError()
-                        case .success(let value):
-                            if let demand = send(value) {
-                                if demand > .none {
-                                    subscription.request(demand)
-                                }
-                            } else {
-                                throw CancellationError()
+                        do throws(Failure) {
+                            let value = try await transform(success)
+                            do {
+                                // no contention except `request` and `cancel`
+                                try await send(isolation: barrier, value)
+                            } catch {
+                                await barrier.markDone()
                             }
+                        } catch {
+                            await barrier.markDone()
+                            // no contention except `request` and `cancel`
+                            await send(barrier: barrier, completion: .failure(error), cancel: true)
                         }
                     }
                     if !flag {
@@ -118,54 +156,65 @@ extension MultiMapTask {
         }
         
         private func terminateStream() {
-            demandSource.continuation.finish()
             valueSource.continuation.finish()
         }
         
-        private func send(completion: Subscribers.Completion<Failure>?, cancel:Bool = false) {
+        private func send(
+            barrier: isolated (some Actor)? = #isolation,
+            completion: Subscribers.Completion<Failure>,
+            cancel:Bool = false
+        ) {
             terminateStream()
-            let (subscriber, effect) = state.withLockUnchecked{
+            let (subscriber, taskEffect) = state.withLockUnchecked{
                 let old = $0.subscriber
                 $0.subscriber = nil
-                let effect = if cancel {
+                let taskEffect = if cancel {
                     $0.condition.transition(.cancel)
                 } else {
                     $0.condition.transition(.finish)
                 }
-                return (old, effect)
+                return (old, taskEffect)
             }
-            effect?.run()
-            if let completion {
-                subscriber?.receive(completion: completion)
-            }
+            (consume subscriber)?.receive(completion: completion)
+            (consume taskEffect)?.run()
         }
         
-        private func send(_ value: S.Input) -> Subscribers.Demand? {
-            let newDemand = state.withLockUnchecked{
-                $0.subscriber
-            }?.receive(value)
-            guard let newDemand else { return nil }
+        
+        private func send(
+            isolation actor: isolated some Actor,
+            _ value: S.Input
+        ) async throws(CancellationError) {
             
-            if maxTasks == .unlimited {
-                return newDemand
+            let (subscriber, subscription) = state.withLockUnchecked{
+                return ($0.subscriber, $0.upstreamSubscription.subscription)
             }
-            return state.withLock{
-                $0.demand.transistion(maxTasks: maxTasks, newDemand, reduce: true)
+            guard let subscriber else {
+                throw CancellationError()
             }
-        }
-        
-        private func receive(demand:Subscribers.Demand) -> Subscribers.Demand {
-            if maxTasks == .unlimited {
-                return demand
+            // subscriber might call extra `request` or `cancel` but as we don't acquire the lock, it is safe to do so.
+            var demand = subscriber.receive(value)
+            // subscription can be null, if upstream is already completed
+            guard let subscription else {
+                return
             }
-            return state.withLock{
-                $0.demand.transistion(maxTasks: maxTasks, demand, reduce: false)
+            defer {
+                if demand > .none {
+                    subscription.request(demand)
+                }
+            }
+            guard maxTasks != .unlimited else {
+                return
+            }
+            // yield so that other task can access to subscriber for a while.
+            await Task.yield()
+            demand = state.withLockUnchecked{
+                $0.demand.transistion(maxTasks: maxTasks, demand, reduce: true)
             }
         }
 
-        private func waitForUpStream() async -> (any Subscription)? {
-            await withTaskCancellationHandler {
-                await withUnsafeContinuation { coninuation in
+        private func waitForUpStream( isolation actor:isolated (any Actor)? = #isolation) async throws {
+            try await withTaskCancellationHandler {
+                try await withUnsafeThrowingContinuation { coninuation in
                     state.withLockUnchecked{
                         $0.upstreamSubscription.transition(.suspend(coninuation))
                     }?.run()
@@ -183,7 +232,7 @@ extension MultiMapTask {
             }?.run()
         }
         
-        private func waitForCondition() async throws {
+        private func waitForCondition( isolation actor:isolated (any Actor)? = #isolation) async throws {
             try await withUnsafeThrowingContinuation{ continuation in
                 state.withLock{
                     $0.condition.transition(.suspend(continuation))
@@ -199,6 +248,7 @@ extension MultiMapTask {
         
         @Sendable
         nonisolated func run() async {
+            // contention can happen with `resumeCondition(_ :) `
             let token:Void? = try? await waitForCondition()
             if token == nil {
                 withUnsafeCurrentTask{
@@ -208,48 +258,39 @@ extension MultiMapTask {
             defer {
                 clearCondition()
             }
-            let subscription = await waitForUpStream()
-            state.withLockUnchecked{
+            // contention can happen with `receive(subscription:)
+            let success:Void? = try? await waitForUpStream()
+            async let job:Void? = state.withLockUnchecked{
                 $0.subscriber
             }?.receive(subscription: self)
-            guard let subscription else {
+            await job
+            guard success != nil else {
                 terminateStream()
                 return
             }
-            await withTaskCancellationHandler {
-                if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
-                    try? await withThrowingDiscardingTaskGroup(returning: Void.self) { group in
-                        defer { terminateStream() }
-                        await localTask(
-                            subscription: subscription,
-                            group: &group
-                        )
-                    }
-                } else {
-                    try? await withThrowingTaskGroup(of: Void.self, returning: Void.self) { group in
-                        defer { terminateStream() }
-                        var iterator = group.makeAsyncIterator()
-                        let stream = AsyncThrowingStream(unfolding: { try await iterator.next() })
-                        async let subTask:() = {
-                            for try await _ in stream {
-                                
-                            }
-                        }()
-                        await localTask(
-                            subscription: subscription,
-                            group: &group
-                        )
-                        try await subTask
-                    }
+            if #available(iOS 17.0, tvOS 17.0, macCatalyst 17.0, macOS 14.0, watchOS 10.0, visionOS 1.0, *) {
+                await withDiscardingTaskGroup(returning: Void.self) { group in
+                    await localTask(
+                        group: &group
+                    )
                 }
-                send(completion: .finished)
-            } onCancel: {
-                subscription.cancel()
-                send(completion: nil, cancel: false)
+            } else {
+                let barrier = SafetyRegion()
+                await { (a:isolated SafetyRegion) in
+                    await simuateDiscardingTaskGroup(isolation: a) { actor, group in
+                        await localTask(isolation: actor, group: &group)
+                    }
+                    return ()
+                }(barrier)
             }
+            // we assume no one is accessing other state
+            // except `Subscription.cancel()`
+            await send(barrier: SafetyRegion?.none, completion: .finished, cancel: false)
+
         }
         
     }
+    
     
 }
 
@@ -262,13 +303,17 @@ extension MultiMapTask.Inner: Subscriber {
     }
     
     func receive(completion: Subscribers.Completion<Upstream.Failure>) {
+        // release upstream subscription
+        state.withLockUnchecked{
+            $0.upstreamSubscription.transition(.finish)
+        }?.run()
         switch completion {
         case .finished:
             break
         case .failure(let failure):
             valueSource.continuation.yield(.failure(failure))
         }
-        valueSource.continuation.finish()
+        terminateStream()
     }
     
     typealias Input = Upstream.Output
@@ -286,13 +331,33 @@ extension MultiMapTask.Inner: Subscriber {
 extension MultiMapTask.Inner: Subscription {
     
     func request(_ demand: Subscribers.Demand) {
-        demandSource.continuation.yield(demand)
+        let (subscription, nextDemand) = state.withLock{
+            let subscription = $0.upstreamSubscription.subscription
+            let newDemand = if subscription == nil {
+                Subscribers.Demand.none
+            } else {
+                $0.demand.transistion(maxTasks: maxTasks, demand, reduce: false)
+            }
+            return (subscription, newDemand)
+        }
+        if let subscription, nextDemand > .none {
+            subscription.request(nextDemand)
+        }
     }
     
     func cancel() {
-        state.withLock{
-            $0.condition.transition(.cancel)
-        }?.run()
+        terminateStream()
+        let (task, subscription, subscriber) = state.withLockUnchecked{
+            let taskEffect = $0.condition.transition(.cancel)
+            let subscriptionEffect = $0.upstreamSubscription.transition(.cancel)
+            let downstream = $0.subscriber
+            $0.subscriber = nil
+            return (taskEffect, subscriptionEffect, downstream)
+        }
+        withExtendedLifetime(subscriber) {
+            subscription?.run()
+            task?.run()
+        }
     }
     
 }

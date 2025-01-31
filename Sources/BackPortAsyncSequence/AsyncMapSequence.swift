@@ -1,0 +1,237 @@
+//
+//  AsyncMapSequence.swift
+//
+//
+//  Created by 박병관 on 6/13/24.
+//
+
+extension BackPort {
+    
+    public struct AsyncMapSequence<Base: AsyncSequence, Transformed> where Base.AsyncIterator: TypedAsyncIteratorProtocol{
+        @usableFromInline
+        let base: Base
+        
+        @usableFromInline
+        let transform: (Base.Element) async throws(Failure) -> Transformed
+        
+        @inlinable
+        package init(
+            _ base: Base,
+            transform: @escaping (Base.Element) async throws(Failure) -> Transformed
+        ) {
+            self.base = base
+            self.transform = transform
+        }
+    }
+    
+    
+}
+
+
+
+extension BackPort.AsyncMapSequence: AsyncSequence, TypedAsyncSequence {
+
+    /// The type of the error that can be produced by the sequence.
+    ///
+    /// The map sequence produces whatever type of error its
+    /// base sequence does.
+    public typealias Failure = AsyncIterator.Failure
+    /// The type of iterator that produces elements of the sequence.
+    public typealias AsyncIterator = Iterator
+    
+    /// The iterator that produces elements of the map sequence.
+    public struct Iterator {
+        
+        @usableFromInline
+        var baseIterator: Base.AsyncIterator
+        
+        @usableFromInline
+        var finished = false
+        
+        @usableFromInline
+        let transform: (Base.Element) async throws(Failure) -> Transformed
+        
+        @usableFromInline
+        init(
+            _ baseIterator: Base.AsyncIterator,
+            transform: @escaping (Base.Element) async throws(Failure) -> Transformed
+        ) {
+            self.baseIterator = baseIterator
+            self.transform = transform
+        }
+
+    }
+    
+    @inlinable
+    public __consuming func makeAsyncIterator() -> Iterator {
+        return Iterator(base.makeAsyncIterator(), transform: transform)
+    }
+}
+
+extension BackPort.AsyncMapSequence.Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
+    
+    public typealias Element = Transformed
+    public typealias Failure = Base.AsyncIterator.Err
+    
+    /// Produces the next element in the map sequence.
+    ///
+    /// This iterator calls `next()` on its base iterator; if this call returns
+    /// `nil`, `next()` returns `nil`. Otherwise, `next()` returns the result of
+    /// calling the transforming closure on the received element.
+    @_disfavoredOverload
+    @inlinable
+    public mutating func next() async throws(Failure) -> Element? {
+        try await next(isolation: nil)
+    }
+    
+    /// Produces the next element in the map sequence.
+    ///
+    /// This iterator calls `next(isolation:)` on its base iterator; if this
+    /// call returns `nil`, `next(isolation:)` returns `nil`. Otherwise,
+    /// `next(isolation:)` returns the result of calling the transforming
+    /// closure on the received element.
+    @inlinable
+    public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(Failure) ->  Element? {
+        guard !finished, let element = try await baseIterator.next(isolation: actor) else {
+            return nil
+        }
+//        let block = transform
+        let wrapper: (Base.Element) async -> Result<Suppress<Element>, Failure> = { [transform] in
+            do throws(Base.AsyncIterator.Err) {
+                let value = try await Suppress(base: transform($0))
+                return .success(value)
+            } catch {
+                return .failure(error)
+            }
+        }
+        do throws(Failure) {
+            
+            return try await wrapper(Suppress(base: element).base).get().base
+        } catch {
+            finished = true
+            throw error
+        }
+    }
+    
+}
+
+extension BackPort.AsyncMapSequence: @unchecked Sendable
+where Base: Sendable,
+      Base.Element: Sendable,
+      Transformed: Sendable { }
+
+extension BackPort.AsyncMapSequence.Iterator: @unchecked Sendable
+where Base.AsyncIterator: Sendable,
+      Base.Element: Sendable,
+      Transformed: Sendable { }
+
+extension BackPort.AsyncMapSequence {
+    
+    
+    @inlinable
+    package init <Source:AsyncSequence, Failure:Error>(
+        _ source: Source,
+        _ failure: Failure.Type = Failure.self,
+        transform: @escaping (Base.Element) async throws(Failure) -> Transformed
+    ) where Source.AsyncIterator: TypedAsyncIteratorProtocol, Source.AsyncIterator.Err == Never, Base == AsyncMapErrorSequence<Source, Failure> {
+        let base = AsyncMapErrorSequence(base: source, failure: failure)
+
+        self.init(base, transform: transform)
+    }
+//    
+//    internal init(
+//        _ base: Base,
+//        block: @escaping (Base.Element) async throws(Never) -> Transformed
+//    )  {
+//        self.init(base, transform: { await block($0) })
+//    }
+//    
+    
+    
+}
+
+//
+//protocol AsyncProducer<Element,Failure>:~Copyable {
+//    
+//    associatedtype Failure:Error
+//    // this is not sendable
+//    associatedtype Element
+//    
+//    // since Element is not sendable we needs `sending`
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Failure) -> sending Element?
+//    
+//}
+//
+//struct MappingProducer<Element,Base:AsyncProducer>: AsyncProducer {
+//    
+//    var base:Base
+//    // can not omit isolation parameter, can not use isolated(any) either
+//    let compute:(isolated (any Actor), consuming Base.Element) async throws(Base.Failure) -> sending Element
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Base.Failure) -> sending Element? {
+//        if let value = try await base.produce(isolation: actor) {
+//            let newValue = try await compute(actor, value)
+//            return newValue
+//        }
+//        
+//        return nil
+//    }
+//    
+//}
+//
+//struct MutatingProducer<State:~Copyable,Effect,EventSource:AsyncProducer>:AsyncProducer,~Copyable {
+//    
+//    var failed = false
+//    var state:State
+//    var source:EventSource
+//    let mutation:(isolated (any Actor), inout State ,sending EventSource.Element) async throws(EventSource.Failure) -> sending Effect
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(EventSource.Failure) -> sending Effect? {
+//        if failed {
+//            return nil
+//        }
+//        if let event = try await source.produce(isolation: actor) {
+//            do {
+//                let effect = try await mutation(actor, &state, event)
+//                
+//                return effect
+//            } catch {
+//                failed = true
+//                throw error
+//            }
+//        }
+//        
+//        return nil
+//    }
+//    
+//    
+//}
+
+//struct FilteringProducer<Element,Base:AsyncProducer>: AsyncProducer {
+//    
+//    var failed = false
+//    var base:Base
+//    // can not omit isolation parameter, can not use isolated(any) either
+//    let predicate:(isolated (any Actor), borrowing Base.Element) async throws(Base.Failure) -> Bool
+//    
+//    mutating func produce(isolation actor: isolated (any Actor)) async throws(Base.Failure) -> sending Base.Element? {
+//        if failed {
+//            return nil
+//        }
+//        if let value = try await base.produce(isolation: actor) {
+//            do {
+//                // Sending 'value' risks causing data races
+//                // may be marking parameter as ~Escape would help?
+//                if try await predicate(actor, value) {
+//                    return value
+//                }
+//            } catch {
+//                failed = true
+//                throw error
+//            }
+//        }
+//        
+//        return nil
+//    }
+//    
+//}

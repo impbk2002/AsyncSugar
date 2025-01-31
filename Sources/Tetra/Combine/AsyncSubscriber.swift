@@ -6,10 +6,11 @@
 //
 
 import Foundation
-import Combine
+@preconcurrency import Combine
+internal import CriticalSection
 
 @usableFromInline
-internal struct AsyncSubscriber<P:Publisher>: Subscriber, Cancellable {
+internal struct AsyncSubscriber<P:Publisher>: Sendable, Subscriber, Cancellable {
     
     
     public typealias Input = P.Output
@@ -52,7 +53,9 @@ internal struct AsyncSubscriber<P:Publisher>: Subscriber, Cancellable {
     }
     
     @usableFromInline
-    func next() async -> Result<Input,Failure>? {
+    func next(
+        isolation: isolated (any Actor)?
+    ) async -> Result<Input,Failure>? {
         return await withUnsafeContinuation { continuation in
             lock.withLockUnchecked{
                 $0.transition(.suspend(continuation))

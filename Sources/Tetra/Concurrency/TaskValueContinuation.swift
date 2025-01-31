@@ -53,6 +53,29 @@ enum TaskValueContinuation: Sendable {
         }
     }
     
+    borrowing
+    func shouldMutate(_ event: Event) -> Bool {
+        switch self {
+        case .waiting:
+            return true
+        case .suspending(_):
+            if case .suspend(_) = event {
+                return false
+            } else {
+                return true
+            }
+        case .cached(_):
+            if case .resume(_) = event {
+                return false
+            } else {
+                return true
+            }
+        case .cancelled, .finished:
+            return false
+            
+        }
+    }
+    
     private mutating func suspend(_ continuation:UnsafeContinuation<Void,any Error>) -> Effect? {
         switch self {
         case .waiting:

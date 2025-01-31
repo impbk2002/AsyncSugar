@@ -7,75 +7,60 @@
 
 import Foundation
 import Combine
+import Namespace
 
-public extension Combine.Future where Failure == Never {
+extension TetraExtension where Base: _CombineFuterProtocol {
     
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(watchOS, deprecated: 8, renamed: "value")
-    @available(macOS, deprecated: 12.0, renamed: "value")
     @inlinable
-    final var compatValue: Output {
-        get async {
-            if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-                return await value
-            } else {
-                return await withCheckedContinuation{ continuation in
-                    self.subscribe(AnySubscriber(
-                        receiveSubscription: {
-                            $0.request(.max(1))
-                        },
-                        receiveValue: {
-                            continuation.resume(returning: $0)
-                            return .none
-                        }
-                    ))
-                }
+    public var value:Base.Output {
+        get async throws(Base.Failure) {
+            let future = base._tetraFuture
+            // subscriber inferface is guaranteed to be called serially, so we can use variable without lock happily :)
+            var subscription: (any Subscription)? = nil
+            defer {
+                withExtendedLifetime(subscription, { })
             }
+            let result: Result<Base.Output,Base.Failure> = await withCheckedContinuation { continuation in
+                future.subscribe(AnySubscriber(
+                    receiveSubscription: {
+                        $0.request(.max(1))
+                        subscription = $0
+                    },
+                    receiveValue: { (value: Base.Output) in
+                        let variable = Suppress(value: value)
+                        continuation.resume(returning: .success(variable.value))
+                        return .none
+                    },
+                    receiveCompletion: {
+                        if case let .failure(error) = $0 {
+                            continuation.resume(returning: .failure(error))
+                        }
+                        subscription = nil
+                    }
+                ))
+            }
+            switch result {
+            case .success(let success):
+                return success
+            case .failure(let failure):
+                throw failure
+            }
+            
         }
     }
     
 }
 
+public protocol _CombineFuterProtocol: Publisher {
 
-public extension Combine.Future {
-    
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(iOS, deprecated: 15.0, renamed: "value")
-    @available(watchOS, deprecated: 8, renamed: "value")
-    @available(macOS, deprecated: 12.0, renamed: "value")
     @inlinable
-    final var compatValue: Output {
-        get async throws {
-            if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, watchOS 8.0, macOS 12.0, *) {
-                return try await value
-            } else {
-                let result: Result<Output,Failure> = await withCheckedContinuation { continuation in
-                    self.subscribe(AnySubscriber(
-                        receiveSubscription: {
-                            $0.request(.max(1))
-                        },
-                        receiveValue: {
-                            continuation.resume(returning: .success($0))
-                            return .none
-                        },
-                        receiveCompletion: {
-                            if case let .failure(error) = $0 {
-                                continuation.resume(returning: .failure(error))
-                            }
-                        }
-                    ))
-                }
-                switch result {
-                case .success(let success):
-                    return success
-                case .failure(let failure):
-                    throw failure
-                }
-            }
-        }
-    }
+    var _tetraFuture: Combine.Future<Output,Failure> { get }
+    
+}
+
+extension Combine.Future: _CombineFuterProtocol {
+    
+    @inlinable
+    public var _tetraFuture: Future<Output, Failure> { self }
     
 }

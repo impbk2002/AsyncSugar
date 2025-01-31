@@ -8,11 +8,12 @@
 
 import Foundation
 @preconcurrency import Combine
+public import BackPortAsyncSequence
 
-public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
+public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncSequence, TypedAsyncSequence {
 
     public typealias AsyncIterator = Iterator
-    public typealias Element = P.Output
+    public typealias Failure = P.Failure
     
     public var publisher:P
     
@@ -21,19 +22,23 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
         Iterator(source: publisher)
     }
     
-    public struct Iterator: AsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol, TypedAsyncIteratorProtocol {
         
         public typealias Element = P.Output
+        public typealias Failure = P.Failure
         @usableFromInline
         internal let inner = AsyncSubscriber<P>()
         @usableFromInline
         internal let reference:AnyCancellable
         
         @inlinable
-        public mutating func next() async throws -> P.Output? {
-            let result = await withTaskCancellationHandler(operation: inner.next) { [reference] in
+        public mutating func next(isolation actor: isolated (any Actor)? = #isolation) async throws(P.Failure) -> P.Output? {
+            let result = await withTaskCancellationHandler { [inner] in
+                await inner.next(isolation: actor)
+            } onCancel: { [reference] in
                 reference.cancel()
             }
+
             switch result {
             case .failure(let failure):
                 throw failure
@@ -42,6 +47,12 @@ public struct CompatAsyncThrowingPublisher<P:Publisher>: AsyncTypedSequence {
             case .none:
                 return nil
             }
+        }
+        
+        @_disfavoredOverload
+        @inlinable
+        public mutating func next() async throws(P.Failure) -> P.Output? {
+            try await next(isolation: nil)
         }
         
         @usableFromInline

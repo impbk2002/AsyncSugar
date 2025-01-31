@@ -8,7 +8,7 @@
 import Foundation
 import Dispatch
 
-public final class DispatchQueueExecutor: SerialExecutor {
+package final class DispatchQueueExecutor: SerialExecutor {
     
     let queue:DispatchQueue
     
@@ -97,6 +97,10 @@ public final class DispatchQueueExecutor: SerialExecutor {
             return queue === other.queue
         }
         return result
+    }
+    
+    public func checkIsolated() {
+        dispatchPrecondition(condition: .onQueue(queue))
     }
     
 }

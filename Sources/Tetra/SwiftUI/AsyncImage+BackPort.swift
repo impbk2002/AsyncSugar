@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import Namespace
 
 
 #if canImport(SwiftUI)

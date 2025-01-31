@@ -71,13 +71,16 @@ import Combine
         
         let cancellable = (0..<20).publisher
             .setFailureType(to: URLError.self)
-            .multiMapTask(maxTasks: .unlimited) { _ in
+            .multiMapTask(maxTasks: .unlimited) { _ throws(URLError) in
+                
                 // Underlying Task is cancelled if subscription is cancelled before task completes.
                 do {
                     let (data, response) = try await URLSession.shared.data(from: URL(string: "https://google.com")!)
-                    return .success(data) as Result<Data,URLError>
+                    // below unsafe cancel is no-op, throw appropriate error to interrupt combine pipeline
+                    // withUnsafeCurrentTask { $0?.cancel() }
+                    return data
                 } catch {
-                    return .failure(error as! URLError) as Result<Data,URLError>
+                    throw (error as! URLError)
                 }
             }.sink { completion in
                 
@@ -101,8 +104,7 @@ import Tetra
             continuation.yield(1)
             continuation.finish()
             // Underlying AsyncIterator and Task receive task cancellation if subscription is cancelled.
-        }.tetra.publisher
-            .catch{ _ in Empty().setFailureType(to: Never.self) }
+        }.tetra.bridge.tetra.publisher
             .sink { number in
                 
             }
@@ -188,3 +190,38 @@ struct ContentView: View {
 - more fine grained way to introduce extension methods (maybe something like `.af` in Alamofire?)
 
 - remove all `AsyncTypedSequence` and `WrappedAsyncSequence` dummy protocol when `FullTypedThrow` is implemented.
+
+## WIP
+
+[PriorityRunLoop](./Sources/Tetra/Concurrency/PriorityRunLoop.swift)
+
+TaskPriority aware NSRunLoop based `Concurrency Serial Executor`.
+
+Can be useful for old Apple Framework that does not support `libDispatch` and only support `CFRunLoop` like `CoreLocation`, `perform(_:on:with:waitUntilDone:)`
+
+Reorder the jobs in Priority Order, and increase QoS level, according to the TaskPriority.
+
+
+[AsyncFlatMap](./Sources/Tetra/Combine/Publishers+AsyncFlatMap.swift)
+
+Combine operator which convert the Upstream to AsyncSequence and transfer the elements to the downstream.
+
+uses actor based cooperative control to minimize contention.
+
+Investingating for a way to backport rich asyncSequence features before Swift 6 platform.
+
+
+[BackportDiscardingTaskGroup](./Sources/BackportDiscardingTaskGroup/ThrowingTaskGroup.swift)
+
+Backport the behavior of `Discarding(Throwing)TaskGroup`. This now possbile thanks to Swift 6 generalized AsyncSequnce. Because we can wrap the `TaskGroup` into isolation.
+
+Investingating for a way to merge it with existing `Discarding(Throwing)TaskGroup` using some kind of opaque types rather than erased types.
+
+Investigating a way to merge NonFailure type and Failing type using typedThrow, which is currently not possible due to Swift 6 compiler bug.
+
+
+[MemorySafe Data/String](./Sources/Tetra/Foundation/PruneMemory.swift)
+
+`Data` and `String` which erase its memory footprints when deallocated. implemented by `CoreFoundation` API.
+
+Still can not erase memory footprints caused by Swift Briding copy and os level memory paging.

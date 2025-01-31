@@ -8,7 +8,7 @@
 import XCTest
 @testable import Tetra
 import Combine
-
+import Testing
 
 final class MapTaskTests: XCTestCase {
 
@@ -118,8 +118,8 @@ final class MapTaskTests: XCTestCase {
             }
             .handleEvents(
             receiveSubscription: { subscription in
-                warmup.fulfill()
                 XCTAssertEqual("\(subscription)", "MapTask")
+                warmup.fulfill()
             },
             receiveOutput: { value in
                 outputHandle(value)
@@ -181,4 +181,8 @@ final class MapTaskTests: XCTestCase {
         token.cancel()
     }
 
+}
+
+func asdfasdf() {
+    
 }

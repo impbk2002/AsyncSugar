@@ -1,12 +1,23 @@
 //
 //  ManagedUnfairLock.swift
-//  
+//
 //
 //  Created by pbk on 2022/12/14.
 //
 
 import Foundation
 import os
+
+@usableFromInline
+internal final class LockBuffer<State,Primitive>: ManagedBuffer<State,Primitive> {
+    
+    @usableFromInline
+    deinit {
+        self.withUnsafeMutablePointerToElements{
+            let _ = $0.deinitialize(count: 1)
+        }
+    }
+}
 
 @available(iOS, deprecated: 16.0, renamed: "OSAllocatedUnfairLock")
 @available(tvOS, deprecated: 16.0, renamed: "OSAllocatedUnfairLock")
@@ -15,7 +26,8 @@ import os
 @available(macOS, deprecated: 13.0, renamed: "OSAllocatedUnfairLock")
 public struct ManagedUnfairLock<State>: @unchecked Sendable {
     
-    private let __lock:ManagedBuffer<State,os_unfair_lock>
+    @usableFromInline
+    internal let __lock:ManagedBuffer<State,os_unfair_lock>
     
     /// Initialize an SwiftUnfairLock with a non-sendable lock-protected
     /// `initialState`.
@@ -28,8 +40,9 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     /// - Parameter initialState: An initial value to store that will be
     ///  protected under the lock.
     ///
+    @inlinable
     public init(uncheckedState initialState: State) {
-        __lock = .create(minimumCapacity: 1) { buffer in
+        __lock = LockBuffer.create(minimumCapacity: 1) { buffer in
             buffer.withUnsafeMutablePointerToElements{ $0.initialize(to: .init()) }
             return initialState
         }
@@ -45,8 +58,9 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     /// - Returns: The return value of `body`.
     /// - Throws: Anything thrown by `body`.
     ///
-    public func withLockUnchecked<R>(_ body: (inout State) throws -> R) rethrows -> R {
-        try __lock.withUnsafeMutablePointers{ state, lock in
+    @inlinable
+    public func withLockUnchecked<R:~Copyable, Failure:Error>(_ body: (inout State) throws(Failure) -> R) throws(Failure) -> R {
+        try __lock.withUnsafeMutablePointers{ state, lock throws(Failure) in
             os_unfair_lock_lock(lock)
             defer { os_unfair_lock_unlock(lock) }
             return try body(&state.pointee)
@@ -60,7 +74,8 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     /// - Returns: The sendable return value of `body`.
     /// - Throws: Anything thrown by `body`.
     ///
-    public func withLock<R>(_ body: @Sendable (inout State) throws -> R) rethrows -> R where R : Sendable {
+    @inlinable
+    public func withLock<R:~Copyable, Failure:Error>(_ body: @Sendable (inout State) throws(Failure) -> R) throws(Failure) -> R where R : Sendable {
         try withLockUnchecked(body)
     }
     
@@ -76,8 +91,9 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     ///            If the lock is not acquired, nil.
     /// - Throws: Anything thrown by `body`.
     ///
-    public func withLockIfAvailableUnchecked<R>(_ body: (inout State) throws -> R) rethrows -> R? {
-        try __lock.withUnsafeMutablePointers{ state, lock in
+    @inlinable
+    public func withLockIfAvailableUnchecked<R:~Copyable,Failure:Error>(_ body: (inout State) throws(Failure) -> R) throws(Failure) -> R? {
+        try __lock.withUnsafeMutablePointers{ state, lock throws(Failure) in
             guard os_unfair_lock_trylock(lock) else { return nil }
             defer { os_unfair_lock_unlock(lock) }
             return try body(&state.pointee)
@@ -92,10 +108,11 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     ///            If the lock is not acquired, nil.
     /// - Throws: Anything thrown by `body`.
     ///
-    public func withLockIfAvailable<R>(_ body: @Sendable (inout State) throws -> R) rethrows -> R? where R : Sendable {
+    @inlinable
+    public func withLockIfAvailable<R:~Copyable,Failure:Error>(_ body: @Sendable (inout State) throws(Failure) -> R) throws(Failure) -> R? where R : Sendable {
         try withLockIfAvailableUnchecked(body)
     }
-
+    
     @frozen
     public enum Ownership: Sendable, Hashable {
         case owner
@@ -113,6 +130,7 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
     ///   - `.owner` - asserts and terminates the process
     ///   - `.notOwner` - returns
     ///
+    @inlinable
     public func precondition(_ condition: Ownership) {
         __lock.withUnsafeMutablePointerToElements {
             switch condition {
@@ -130,14 +148,16 @@ public struct ManagedUnfairLock<State>: @unchecked Sendable {
 public extension ManagedUnfairLock where State == Void {
     
     /// Initialize an SwiftUnfairLock with no protected state.
+    @inlinable
     init() {
-        __lock = .create(minimumCapacity: 1) { buffer in
+        __lock = LockBuffer.create(minimumCapacity: 1) { buffer in
             buffer.withUnsafeMutablePointerToElements{ $0.initialize(to: .init()) }
         }
     }
     
     /// Acquire this lock.
     @_unavailableFromAsync(message: "Use async-safe scoped locking instead")
+    @inlinable
     func lock() {
         __lock.withUnsafeMutablePointerToElements {
             os_unfair_lock_lock($0)
@@ -146,6 +166,7 @@ public extension ManagedUnfairLock where State == Void {
     
     /// Unlock this lock.
     @_unavailableFromAsync(message: "Use async-safe scoped locking instead")
+    @inlinable
     func unlock() {
         __lock.withUnsafeMutablePointerToElements{ os_unfair_lock_unlock($0) }
     }
@@ -156,7 +177,8 @@ public extension ManagedUnfairLock where State == Void {
     /// - Returns: The return value of `body`.
     /// - Throws: Anything thrown by `body`.
     ///
-    func withLock<R>(_ body: @Sendable () throws -> R) rethrows -> R where R : Sendable {
+    @inlinable
+    func withLock<R:~Copyable,Failure:Error>(_ body: @Sendable () throws(Failure) -> R) throws(Failure) -> R where R : Sendable {
         try withLockUnchecked(body)
     }
     
@@ -170,8 +192,9 @@ public extension ManagedUnfairLock where State == Void {
     /// - Returns: The return value of `body`.
     /// - Throws: Anything thrown by `body`.
     ///
-    func withLockUnchecked<R>(_ body: () throws -> R) rethrows -> R {
-        try __lock.withUnsafeMutablePointerToElements { lock in
+    @inlinable
+    func withLockUnchecked<R:~Copyable, Failure:Error>(_ body: () throws(Failure) -> R) throws(Failure) -> R {
+        try __lock.withUnsafeMutablePointerToElements { lock throws(Failure) in
             os_unfair_lock_lock(lock)
             defer { os_unfair_lock_unlock(lock) }
             return try body()
@@ -183,7 +206,8 @@ public extension ManagedUnfairLock where State == Void {
     /// - Returns: `true` if the lock was succesfully locked, and
     ///  `false` if the lock attempt failed.
     @available(*, noasync, message: "Use async-safe scoped locking instead")
-     func lockIfAvailable() -> Bool {
+    @inlinable
+    func lockIfAvailable() -> Bool {
         __lock.withUnsafeMutablePointerToElements { os_unfair_lock_trylock($0) }
     }
     
@@ -195,7 +219,8 @@ public extension ManagedUnfairLock where State == Void {
     ///            If the lock is not acquired, nil.
     /// - Throws: Anything thrown by `body`.
     ///
-    func withLockIfAvailable<R>(_ body: @Sendable () throws -> R) rethrows -> R? where R : Sendable {
+    @inlinable
+    func withLockIfAvailable<R:~Copyable,Failure:Error>(_ body: @Sendable () throws(Failure) -> R) throws(Failure) -> R? where R : Sendable {
         try withLockIfAvailableUnchecked(body)
     }
     
@@ -211,8 +236,9 @@ public extension ManagedUnfairLock where State == Void {
     ///            If the lock is not acquired, nil.
     /// - Throws: Anything thrown by `body`.
     ///
-    func withLockIfAvailableUnchecked<R>(_ body: () throws -> R) rethrows -> R? {
-        try __lock.withUnsafeMutablePointerToElements{ lock in
+    @inlinable
+    func withLockIfAvailableUnchecked<R:~Copyable, Failure:Error>(_ body: () throws(Failure) -> R) throws(Failure) -> R? {
+        try __lock.withUnsafeMutablePointerToElements{ lock throws(Failure) in
             guard os_unfair_lock_trylock(lock) else { return nil }
             defer { os_unfair_lock_unlock(lock) }
             return try body()
@@ -227,6 +253,7 @@ public extension ManagedUnfairLock {
     /// `initialState`.
     /// - Parameter initialState: An initial value to store that will be
     ///   protected under the lock.
+    @inlinable
     init(initialState: State) where State:Sendable {
         __lock = .create(minimumCapacity: 1) { buffer in
             buffer.withUnsafeMutablePointerToElements{ $0.initialize(to: .init()) }
@@ -237,35 +264,40 @@ public extension ManagedUnfairLock {
 }
 
 @usableFromInline
-internal protocol UnfairStateLock<State>: Sendable {
+package protocol UnfairStateLock<State>: Sendable {
     
     associatedtype State
-    
+    @inlinable
     func withLock<R>(_ body: @Sendable (inout State) throws -> R) rethrows -> R where R : Sendable
-    
+    @inlinable
     func withLockUnchecked<R>(_ body: (inout State) throws -> R) rethrows -> R
-   
+    @inlinable
     func withLockIfAvailableUnchecked<R>(_ body: (inout State) throws -> R) rethrows -> R?
-        
+    @inlinable
     init(uncheckedState initialState: State)
-    
+    @inlinable
     func withLockIfAvailable<R>(_ body: @Sendable (inout State) throws -> R) rethrows -> R? where R: Sendable
     
 }
 
 @usableFromInline
-internal protocol UnfairLockProtocol: Sendable {
+package protocol UnfairLockProtocol: Sendable {
     
+    @inlinable
     init()
     
+    @inlinable
     @_unavailableFromAsync(message: "Use async-safe scoped locking instead")
     func lock()
     
+    @inlinable
     @_unavailableFromAsync(message: "Use async-safe scoped locking instead")
     func unlock()
     
+    @inlinable
     func withLockUnchecked<R>(_ body: () throws -> R) rethrows -> R
     
+    @inlinable
     func withLock<R>(_ body: @Sendable () throws -> R) rethrows -> R where R : Sendable
     
 }
@@ -277,8 +309,8 @@ extension OSAllocatedUnfairLock<Void>: UnfairLockProtocol {}
 extension ManagedUnfairLock: UnfairStateLock {}
 extension ManagedUnfairLock<Void>: UnfairLockProtocol {}
 
-@usableFromInline
-internal func createUncheckedStateLock<State>(uncheckedState initialState:State) -> some UnfairStateLock<State> {
+@inlinable
+package func createUncheckedStateLock<State>(uncheckedState initialState:State) -> some UnfairStateLock<State> {
     if #available(iOS 16.0, tvOS 16.0, macCatalyst 16.0, watchOS 9.0, macOS 13.0, *) {
         return OSAllocatedUnfairLock(uncheckedState: initialState)
     } else {
@@ -286,8 +318,8 @@ internal func createUncheckedStateLock<State>(uncheckedState initialState:State)
     }
 }
 
-@usableFromInline
-internal func createCheckedStateLock<State:Sendable>(checkedState initialState:State) -> some UnfairStateLock<State> {
+@inlinable
+package func createCheckedStateLock<State:Sendable>(checkedState initialState:State) -> some UnfairStateLock<State> {
     if #available(iOS 16.0, tvOS 16.0, macCatalyst 16.0, watchOS 9.0, macOS 13.0, *) {
         return OSAllocatedUnfairLock(initialState: initialState)
     } else {
@@ -295,8 +327,8 @@ internal func createCheckedStateLock<State:Sendable>(checkedState initialState:S
     }
 }
 
-@usableFromInline
-internal func createUnfairLock() -> some UnfairLockProtocol {
+@inlinable
+package func createUnfairLock() -> some UnfairLockProtocol {
     if #available(iOS 16.0, tvOS 16.0, macCatalyst 16.0, watchOS 9.0, macOS 13.0, *) {
         return OSAllocatedUnfairLock()
     } else {

@@ -5,13 +5,15 @@
 //  Created by pbk on 2023/05/30.
 //
 
-import XCTest
+import Testing
+import Foundation
 @testable import Tetra
 
-final class PlistWrapperTests: XCTestCase {
-
+@Suite
+struct PlistWrapperTests {
     
-    func testDataArraySerialization() throws {
+    @Test
+    func dataArraySerialization() throws {
         let data = Data(UUID().uuidString.utf8)
         let wrapper:PlistWrapper = [.data(data)]
         let actual = NSArray(object: (data as NSData))
@@ -19,13 +21,16 @@ final class PlistWrapperTests: XCTestCase {
         pEncoder.outputFormat = .xml
         let serializedXMLData = try PropertyListSerialization.data(fromPropertyList: actual, format: .xml, options: 0)
         let encodedXMLData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedXMLData, encodedXMLData)
+        #expect(serializedXMLData == encodedXMLData)
+//        XCTAssertEqual(serializedXMLData, encodedXMLData)
         pEncoder.outputFormat = .binary
         let serializedBinaryData = try PropertyListSerialization.data(fromPropertyList: actual, format: .binary, options: 0)
         let encodedBinaryData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedBinaryData, encodedBinaryData)
+        #expect(serializedBinaryData == encodedBinaryData)
+//        XCTAssertEqual(serializedBinaryData, encodedBinaryData)
     }
     
+    @Test
     func testDataDictionarySerialization() throws {
         let object = ["A": Data(UUID().uuidString.utf8)]
         let wrapper:PlistWrapper = .object(object.mapValues{ .data($0) })
@@ -34,13 +39,14 @@ final class PlistWrapperTests: XCTestCase {
         pEncoder.outputFormat = .xml
         let serializedXMLData = try PropertyListSerialization.data(fromPropertyList: actual, format: .xml, options: 0)
         let encodedXMLData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedXMLData, encodedXMLData)
+        #expect(serializedXMLData == encodedXMLData)
         pEncoder.outputFormat = .binary
         let serializedBinaryData = try PropertyListSerialization.data(fromPropertyList: actual, format: .binary, options: 0)
         let encodedBinaryData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedBinaryData, encodedBinaryData)
+        #expect(serializedBinaryData == encodedBinaryData)
     }
     
+    @Test
     func testDateArraySerialization() throws {
         let date = Date()
         let wrapper:PlistWrapper = [.date(date)]
@@ -49,13 +55,14 @@ final class PlistWrapperTests: XCTestCase {
         pEncoder.outputFormat = .xml
         let serializedXMLData = try PropertyListSerialization.data(fromPropertyList: actual, format: .xml, options: 0)
         let encodedXMLData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedXMLData, encodedXMLData)
+        #expect(serializedXMLData == encodedXMLData)
         pEncoder.outputFormat = .binary
         let serializedBinaryData = try PropertyListSerialization.data(fromPropertyList: actual, format: .binary, options: 0)
         let encodedBinaryData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedBinaryData, encodedBinaryData)
+        #expect(serializedBinaryData == encodedBinaryData)
     }
     
+    @Test
     func testDateDictionarySerialization() throws {
         let object = [
             UUID().uuidString: Date()
@@ -66,35 +73,38 @@ final class PlistWrapperTests: XCTestCase {
         pEncoder.outputFormat = .xml
         let serializedXMLData = try PropertyListSerialization.data(fromPropertyList: actual, format: .xml, options: 0)
         let encodedXMLData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedXMLData, encodedXMLData)
+        #expect(serializedXMLData == encodedXMLData)
         pEncoder.outputFormat = .binary
         let serializedBinaryData = try PropertyListSerialization.data(fromPropertyList: actual, format: .binary, options: 0)
         let encodedBinaryData = try pEncoder.encode(wrapper)
-        XCTAssertEqual(serializedBinaryData, encodedBinaryData)
+        #expect(serializedBinaryData == encodedBinaryData)
     }
     
+    @Test
     func testCustomDecoder1() throws {
         try runCustomDecoder(
             JsonSample1Model.self,
-            url: XCTUnwrap(
+            url: #require(
                 Bundle.module.url(forResource: "PlistSample1", withExtension: "plist")
             )
         )
     }
     
+    @Test
     func testCustomDecoder2() throws {
         try runCustomDecoder(
             JsonSample2Model.self,
-            url: XCTUnwrap(
+            url: #require(
                 Bundle.module.url(forResource: "PlistSample2", withExtension: "plist")
             )
         )
     }
     
+    @Test
     func testCustomDecoder3() throws {
         try runCustomDecoder(
             JsonSample3Model.self,
-            url: XCTUnwrap(
+            url: #require(
                 Bundle.module.url(forResource: "PlistSample3", withExtension: "plist")
             )
         )
@@ -105,33 +115,36 @@ final class PlistWrapperTests: XCTestCase {
         let model = try PropertyListDecoder().decode(type, from: data)
         let jsonWrapper = try PlistWrapper(from: data)
         let model2 = try PlistWrapperDecoder().decode(type, from: jsonWrapper)
-        XCTAssertEqual(model, model2)
+        #expect(model == model2)
     }
     
     private func runCustomEncoder<T:Codable>(_ value:T) throws {
         let data = try PropertyListEncoder().encode(value)
         let jsonWrapper = try PropertyListSerialization.propertyList(from: data, format: nil) as! NSObject
         let model = try PlistWrapperEncoder().encode(value).propertyObject as! NSObject
-        XCTAssertEqual(model, jsonWrapper)
+        #expect(model == jsonWrapper)
     }
     
     
+    @Test
     func testCustomEncoder1() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "PlistSample1", withExtension: "plist"))
+        let url = try #require(Bundle.module.url(forResource: "PlistSample1", withExtension: "plist"))
         let model = try PropertyListDecoder().decode(JsonSample1Model.self, from: Data(contentsOf: url))
         try runCustomEncoder(model)
     }
 
+    @Test
     func testCustomEncoder2() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "PlistSample2", withExtension: "plist"))
+        let url = try #require(Bundle.module.url(forResource: "PlistSample2", withExtension: "plist"))
         let model = try PropertyListDecoder().decode(JsonSample2Model.self, from: Data(contentsOf: url))
         try runCustomEncoder(model)
     }
     
+    @Test
     func testCustomEncoder3() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "PlistSample3", withExtension: "plist"))
+        let url = try #require(Bundle.module.url(forResource: "PlistSample3", withExtension: "plist"))
         let model = try PropertyListDecoder().decode(JsonSample3Model.self, from: Data(contentsOf: url))
         try runCustomEncoder(model)
     }
-
+    
 }

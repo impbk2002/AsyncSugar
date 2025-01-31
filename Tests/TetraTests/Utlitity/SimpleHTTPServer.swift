@@ -8,7 +8,7 @@
 import Foundation
 import Network
 
-class SimpleHTTPServer {
+class SimpleHTTPServer: @unchecked Sendable {
     
     var port: NWEndpoint.Port? {
         listener.port
@@ -16,12 +16,12 @@ class SimpleHTTPServer {
     
     let queue:DispatchQueue
     let listener: NWListener
-    let errorHandler: (any Error) -> Void
+    let errorHandler: @Sendable (any Error) -> Void
     var response:String = "Hello, World!"
     init(
         queue:DispatchQueue,
         port: NWEndpoint.Port,
-        errorHandle: @escaping (any Error) -> Void
+        errorHandle: @escaping @Sendable (any Error) -> Void
     ) throws {
         self.listener = try NWListener(using: .tcp, on: port)
         self.queue = queue

@@ -43,11 +43,15 @@ public struct BindingCollection<T:MutableCollection>: Collection {
         if #available(iOS 15.0, tvOS 15.0, macCatalyst 15.0, macOS 12.0, watchOS 8.0, *) {
             return binding[position]
         } else {
-            return .init {
-                binding.wrappedValue[position]
-            } set: { newValue, transaction in
+            nonisolated(unsafe)
+            let index = position
+            return .init { [binding] in
+                binding.wrappedValue[index]
+            } set: { [binding] newValue, transaction in
+                nonisolated(unsafe)
+                let ref = binding
                 withTransaction(transaction) {
-                    binding.wrappedValue[position] = newValue
+                    ref.wrappedValue[index] = newValue
                 }
             }
 
